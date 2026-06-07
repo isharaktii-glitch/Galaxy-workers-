@@ -9,18 +9,38 @@ const db = new sqlite3.Database('/tmp/galaxy.db');
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
 
-// 🛠️ DATABASE SETUP: Proof Submission Table එක අලුතින් එකතු කර ඇත
+// 🗄️ DATABASE SETUP
 db.serialize(() => {
     db.run("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, email TEXT, balance REAL DEFAULT 0.0, address TEXT, contact TEXT)");
     db.run("CREATE TABLE IF NOT EXISTS task_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, task_name TEXT, amount REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)");
-    db.run("CREATE TABLE IF NOT EXISTS proof_submissions (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, category TEXT, proof_text TEXT, status TEXT DEFAULT 'PENDING', timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)");
-    
     db.run("INSERT OR IGNORE INTO users (username, password, email, balance, address, contact) VALUES ('admin', 'admin123', 'admin@galaxy.com', 0.0, 'Headquarters', '0000000000')");
 });
 
 const translations = {
-    en: { title: "GALAXY WORKERS", login: "Worker Login", reg: "Worker Registration", user: "Username", pass: "Password", email: "Email Address", addr: "Full Address", phone: "Contact Number", btnLog: "LOG IN", btnReg: "REGISTER", logout: "Logout", forgot: "Forgot Password?" },
-    si: { title: "GALAXY WORKERS", login: "සේවක ඇතුල්වීම", reg: "සේවක ලියාපදිංචිය", user: "පරිශීලක නාමය (Username)", pass: "මුරපදය (Password)", email: "ඊමේල් ලිපිනය (Email)", addr: "සම්පූර්ණ ලිපිනය", phone: "WhatsApp / දුරකථන අංකය", btnLog: "ඇතුල් වන්න", btnReg: "ලියාපදිංචි වන්න", logout: "ඉවත් වන්න", forgot: "මුරපදය අමතකද?" }
+    en: {
+        title: "GALAXY WORKERS", login: "Worker Login", reg: "Worker Registration",
+        user: "Username", pass: "Password", email: "Email Address", addr: "Full Address", phone: "Contact Number",
+        btnLog: "LOG IN", btnReg: "REGISTER", noAcc: "Don't have an account?", regHere: "Register here",
+        backLog: "Back to Login", welcome: "Welcome", total: "Your Total Earnings", tasks: "Available Micro Tasks 👇",
+        subText: "Complete the tasks below. Your earnings will automatically add to your balance.", logout: "Logout",
+        forgot: "Forgot Password?", recoverTitle: "Recover Password", btnRecover: "RECOVER"
+    },
+    si: {
+        title: "GALAXY WORKERS", login: "සේවක ඇතුල්වීම", reg: "සේවක ලියාපදිංචිය",
+        user: "පරිශීලක නාමය (Username)", pass: "මුරපදය (Password)", email: "ඊමේල් ලිපිනය (Email)", addr: "සම්පූර්ණ ලිපිනය", phone: "WhatsApp / දුරකථන අංකය",
+        btnLog: "ඇතුල් වන්න", btnReg: "ලියාපදිංචි වන්න", noAcc: "ගිණුමක් නොමැතිද?", regHere: "මෙහි ලියාපදිංචි වන්න",
+        backLog: "නැවත මුල් පිටුවට", welcome: "ආයුබෝවන්", total: "ඔබේ මුළු උපයනය", tasks: "කිරීමට ඇති සරල වැඩ (Tasks) 👇",
+        subText: "පහත ඇති Tasks සම්පූර්ණ කරන්න. ඔබ උපයන මුදල් ස්වයංක්‍රීයවම ගිණුමට එකතු වේ.", logout: "ඉවත් වන්න (Logout)",
+        forgot: "මුරපදය අමතකද? (Forgot Password)", recoverTitle: "මුරපදය නැවත ලබාගැනීම", btnRecover: "මුරපදය පෙන්වන්න"
+    },
+    ta: {
+        title: "GALAXY WORKERS", login: "பணியாளர் உள்நுழைவு", reg: "பணியாளர் பதிவு",
+        user: "பயனர் பெயர் (Username)", pass: "கடவுச்சொல் (Password)", email: "மின்னஞ்சல் முகவரி", addr: "முழு முகவரி", phone: "தொலைபேசி எண்",
+        btnLog: "உள்நுழைக", btnReg: "பதிவு செய்க", noAcc: "கணக்கு இல்லையா?", regHere: "இங்கே பதிவு செய்யவும்",
+        backLog: "மீண்டும் உள்நுழைய", welcome: "வரவேற்கிறோம்", total: "உங்கள் மொத்த வருவாய்", tasks: "கிடைக்கக்கூடிய பணிகள் 👇",
+        subText: "கீழே உள்ள பணிகளை முடிக்கவும். உங்கள் வருவாய் தானாகவே உங்கள் கணக்கில் சேர்க்கப்படும்.", logout: "வெளியேறு (Logout)",
+        forgot: "கடவுச்சொல் மறந்துவிட்டதா?", recoverTitle: "கடவுச்சொல்லை மீட்டெடுக்கவும்", btnRecover: "மீட்டெடுப்போம்"
+    }
 };
 
 const htmlWrapper = (req, title, content) => {
@@ -31,11 +51,9 @@ const htmlWrapper = (req, title, content) => {
         .container{max-width:800px;margin:30px auto;background:#1f2833;padding:25px;border-radius:10px;border:1px solid #45a29e;box-shadow: 0px 0px 15px rgba(69, 162, 158, 0.2);position:relative;}
         .lang-selector { position: absolute; top: 15px; right: 15px; }
         .lang-selector select { background: #0b0c10; color: #66fcf1; border: 1px solid #45a29e; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        input, textarea, select.form-input {width:95%;padding:10px;margin:8px 0;border-radius:5px;border:1px solid #45a29e;background:#0b0c10;color:#fff;} 
+        input{width:95%;padding:10px;margin:8px 0;border-radius:5px;border:1px solid #45a29e;background:#0b0c10;color:#fff;} 
         button{width:100%;padding:12px;background:#45a29e;border:none;color:#0b0c10;font-weight:bold;font-size:16px;border-radius:5px;cursor:pointer;margin-top:10px;}
         button:hover{background:#66fcf1;}
-        .cat-btn { background:#0b0c10; color:#66fcf1; border:1px solid #45a29e; padding:12px; margin:5px; border-radius:5px; cursor:pointer; font-weight:bold; display:inline-block; text-decoration:none; font-size:14px; }
-        .cat-btn:hover, .cat-btn.active { background:#45a29e; color:#0b0c10; }
         .user-row{background:#0b0c10;padding:12px;margin:10px 0;border-radius:5px;border-left:5px solid #45a29e;text-align:left;}
         a{color:#66fcf1;text-decoration:none;} .logout-btn{background:#ff4d4d;color:#fff;width:auto;padding:5px 10px;font-size:12px;float:right;}
     </style></head><body><div class="container">
@@ -43,26 +61,50 @@ const htmlWrapper = (req, title, content) => {
         <select onchange="window.location.href='/change-lang?lang=' + this.value}">
             <option value="en" ${lang === 'en' ? 'selected' : ''}>English</option>
             <option value="si" ${lang === 'si' ? 'selected' : ''}>සිංහල</option>
+            <option value="ta" ${lang === 'ta' ? 'selected' : ''}>தமிழ்</option>
         </select>
     </div><h2 style="text-align:center;color:#66fcf1;margin-top:15px;">${translations[lang].title}</h2>${content}</div></body></html>`;
 };
 
 app.get('/change-lang', (req, res) => {
     const selectedLang = req.query.lang;
-    if (['en', 'si'].includes(selectedLang)) req.session.lang = selectedLang;
+    if (['en', 'si', 'ta'].includes(selectedLang)) req.session.lang = selectedLang;
     res.redirect('back');
 });
 
-// LOGIN, REGISTER, FORGOT PASSWORD ROUTES
+// LOGIN
 app.get('/', (req, res) => {
     if (req.session.user) return res.redirect('/dashboard');
     const t = translations[req.session.lang || 'en'];
-    res.send(htmlWrapper(req, 'Login', `<h3>${t.login}</h3><form action="/login" method="POST"><input type="text" name="username" placeholder="${t.user}" required><input type="password" name="password" placeholder="${t.pass}" required><button type="submit">${t.btnLog}</button></form><p style="text-align:center; margin-top:15px;">${t.noAcc} <a href="/register">${t.regHere}</a> <br><br><a href="/forgot-password" style="color:#ff4d4d; font-size:14px;">${t.forgot}</a></p>`));
+    res.send(htmlWrapper(req, 'Login', `
+        <h3>${t.login}</h3>
+        <form action="/login" method="POST">
+            <input type="text" name="username" placeholder="${t.user}" required>
+            <input type="password" name="password" placeholder="${t.pass}" required>
+            <button type="submit">${t.btnLog}</button>
+        </form>
+        <p style="text-align:center; margin-top:15px;">
+            ${t.noAcc} <a href="/register">${t.regHere}</a> <br><br>
+            <a href="/forgot-password" style="color:#ff4d4d; font-size:14px;">${t.forgot}</a>
+        </p>
+    `));
 });
 
+// REGISTER
 app.get('/register', (req, res) => {
     const t = translations[req.session.lang || 'en'];
-    res.send(htmlWrapper(req, 'Register', `<h3>${t.reg}</h3><form action="/register" method="POST"><input type="text" name="username" placeholder="${t.user}" required><input type="email" name="email" placeholder="${t.email}" required><input type="password" name="password" placeholder="${t.pass}" required><input type="text" name="address" placeholder="${t.addr}" required><input type="text" name="contact" placeholder="${t.phone}" required><button type="submit">${t.btnReg}</button></form><p style="text-align:center;"><a href="/">${t.backLog}</a></p>`));
+    res.send(htmlWrapper(req, 'Register', `
+        <h3>${t.reg}</h3>
+        <form action="/register" method="POST">
+            <input type="text" name="username" placeholder="${t.user}" required>
+            <input type="email" name="email" placeholder="${t.email}" required>
+            <input type="password" name="password" placeholder="${t.pass}" required>
+            <input type="text" name="address" placeholder="${t.addr}" required>
+            <input type="text" name="contact" placeholder="${t.phone}" required>
+            <button type="submit">${t.btnReg}</button>
+        </form>
+        <p style="text-align:center;"><a href="/">${t.backLog}</a></p>
+    `));
 });
 
 app.post('/register', (req, res) => {
@@ -73,177 +115,135 @@ app.post('/register', (req, res) => {
     });
 });
 
+// FORGOT PASSWORD
 app.get('/forgot-password', (req, res) => {
-    res.send(htmlWrapper(req, 'Forgot Password', `<h3>Recover Password</h3><form action="/forgot-password" method="POST"><input type="text" name="username" placeholder="Username" required><input type="email" name="email" placeholder="Email Address" required><button type="submit">RECOVER</button></form><p style="text-align:center;"><a href="/">Back to Login</a></p>`));
+    const t = translations[req.session.lang || 'en'];
+    res.send(htmlWrapper(req, 'Forgot Password', `
+        <h3>${t.recoverTitle}</h3>
+        <form action="/forgot-password" method="POST">
+            <input type="text" name="username" placeholder="${t.user}" required>
+            <input type="email" name="email" placeholder="${t.email}" required>
+            <button type="submit">${t.btnRecover}</button>
+        </form>
+        <p style="text-align:center;"><a href="/">${t.backLog}</a></p>
+    `));
 });
 
 app.post('/forgot-password', (req, res) => {
     const { username, email } = req.body;
     db.get("SELECT password FROM users WHERE username = ? AND email = ?", [username, email], (err, row) => {
-        if (row) res.send(htmlWrapper(req, 'Password Recovered', `<div style="border:1px solid #45a29e; padding:20px; border-radius:5px; text-align:center;"><h3 style="color:#66fcf1;">Your Password is:</h3><h1>${row.password}</h1><br><a href="/">Login</a></div>`));
-        else res.send(htmlWrapper(req, 'Error', `<h3>Details do not match!</h3><a href="/forgot-password">Try again</a>`));
+        if (row) {
+            res.send(htmlWrapper(req, 'Password Recovered', `
+                <div style="border:1px solid #45a29e; padding:20px; border-radius:5px; text-align:center;">
+                    <h3 style="color:#66fcf1;">Your Password is:</h3>
+                    <h1 style="color:#fff; background:#0b0c10; padding:10px; display:inline-block; border-radius:5px;">${row.password}</h1>
+                    <br><br><a href="/">Click here to Login</a>
+                </div>
+            `));
+        } else {
+            res.send(htmlWrapper(req, 'Error', `<h3>Details do not match!</h3><a href="/forgot-password">Try again</a>`));
+        }
     });
 });
 
 app.post('/login', (req, res) => {
     const { username, password } = req.body;
     db.get("SELECT * FROM users WHERE username = ? AND password = ?", [username, password], (err, row) => {
-        if (row) { req.session.user = row; res.redirect('/dashboard'); }
-        else res.send(htmlWrapper(req, 'Error', `<h3>Invalid Credentials!</h3><a href="/">Try again</a>`));
+        if (row) { 
+            req.session.user = row; 
+            res.redirect('/dashboard'); 
+        } else {
+            res.send(htmlWrapper(req, 'Error', `<div style="border:1px solid #ff4d4d; padding:20px; border-radius:5px;"><h3>Invalid Username or Password!</h3><a href="/">Try again</a></div>`));
+        }
     });
 });
 
-app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/'); });
+app.get('/logout', (req, res) => {
+    req.session.destroy();
+    res.redirect('/');
+});
 
-// 📊 MAIN DASHBOARD (කැටගරි සිස්ටම් එක සහිතව)
+// 📊 DASHBOARD
 app.get('/dashboard', (req, res) => {
     if (!req.session.user) return res.redirect('/');
     const user = req.session.user.username;
-    const currentCat = req.query.category || 'youtube'; // Default category
+    const t = translations[req.session.lang || 'en'];
 
-    // 💡 Timewall Embed URL (ඔයාගේ එක දාගන්න)
     const timewallWidgetBaseURL = "https://timewall.io/embed/your-widget-id"; 
     const finalIframeSrc = `${timewallWidgetBaseURL}?subid=${user}`;
 
-    // 🗂️ කැටගරි අනුව වෙනස් වන දත්ත (Content Area)
-    let categoryContent = '';
-    if (currentCat === 'youtube') {
-        categoryContent = `
-            <div style="background:#0b0c10; padding:20px; border-radius:5px; margin-top:15px; border-left:5px solid #ff4d4d;">
-                <h3 style="color:#ff4d4d; margin-top:0;">📺 YouTube Video Tasks</h3>
-                <p>1. Go to YouTube and search for <strong>"Galaxy Business Tips"</strong>.</p>
-                <p>2. Watch the latest video fully, like it, and subscribe.</p>
-                <p>💰 <strong>Reward: $0.0500 per view</strong></p>
-            </div>`;
-    } else if (currentCat === 'apps') {
-        categoryContent = `
-            <div style="background:#0b0c10; padding:20px; border-radius:5px; margin-top:15px; border-left:5px solid #66fcf1;">
-                <h3 style="color:#66fcf1; margin-top:0;">📱 Mobile App Installing Tasks</h3>
-                <p>1. Download the specified app using our referral links shared in the WhatsApp group.</p>
-                <p>2. Register an account and keep the app for 2 days.</p>
-                <p>💰 <strong>Reward: $0.2500 per install</strong></p>
-            </div>`;
-    } else if (currentCat === 'seo') {
-        categoryContent = `
-            <div style="background:#0b0c10; padding:20px; border-radius:5px; margin-top:15px; border-left:5px solid #45a29e;">
-                <h3 style="color:#45a29e; margin-top:0;">🌐 Website Visiting & SEO Tasks</h3>
-                <p>Complete the fast automation and website browsing micro tasks below. Earnings will be tracked instantly!</p>
-                <iframe src="${finalIframeSrc}" width="100%" height="500px" frameborder="0" style="border-radius:8px; background:#fff; margin-top:15px;"></iframe>
-            </div>`;
-    } else if (currentCat === 'kyc') {
-        categoryContent = `
-            <div style="background:#0b0c10; padding:20px; border-radius:5px; margin-top:15px; border-left:5px solid #f5b041;">
-                <h3 style="color:#f5b041; margin-top:0;">🆔 Identity & KYC Verifications</h3>
-                <p>1. Complete the crypto wallet or account verification tasks as requested by the team lead.</p>
-                <p>💰 <strong>Reward: $1.5000 per verified account</strong></p>
-            </div>`;
-    }
+    const timewallIframe = `
+        <h3 style="color:#66fcf1; margin-top:30px; text-align:left;">${t.tasks}</h3>
+        <p style="font-size:13px; color:#aaa; text-align:left;">${t.subText}</p>
+        <iframe src="${finalIframeSrc}" width="100%" height="600px" frameborder="0" style="border-radius:8px; background:#fff; margin-top:15px;"></iframe>
+    `;
 
-    // 🗳️ Proof Submission Form (YouTube, Apps, KYC සඳහා විතරක් පෙන්වයි)
-    let proofForm = '';
-    if (currentCat !== 'seo') {
-        proofForm = `
-            <div style="background:#1f2833; padding:20px; border-radius:5px; margin-top:20px; border:1px solid #45a29e;">
-                <h4 style="color:#66fcf1; margin-top:0;">📤 Submit Task Proof</h4>
-                <form action="/submit-proof" method="POST">
-                    <input type="hidden" name="category" value="${currentCat}">
-                    <textarea name="proof_text" rows="3" placeholder="Enter your registered Email, Username, or Paste the Screenshot Imgur/Drive Link here as proof..." required></textarea>
-                    <button type="submit" style="background:#66fcf1; color:#0b0c10;">SUBMIT PROOF</button>
-                </form>
-            </div>`;
-    }
-
-    // 🛠️ ADMIN CONTROL PANEL VIEW
     if (user === 'admin') {
         db.all("SELECT * FROM users WHERE username != 'admin'", [], (err, users) => {
-            db.all("SELECT * FROM proof_submissions WHERE status = 'PENDING'", [], (err, proofs) => {
-                let userList = users.map(u => `<div class="user-row"><strong>Worker:</strong> ${u.username} | <strong>Email:</strong> ${u.email} | <strong>Balance:</strong> $${u.balance.toFixed(4)} <br><strong>Contact:</strong> ${u.contact} | <strong>Address:</strong> ${u.address}</div>`).join('');
-                let pendingProofs = proofs.map(p => `
-                    <div class="user-row" style="border-left-color:#f5b041;">
-                        <strong>Worker:</strong> ${p.username} | <strong>Category:</strong> ${p.category.toUpperCase()} <br>
-                        <strong>Submitted Proof:</strong> <span style="color:#fff;">${p.proof_text}</span> <br>
-                        <form action="/admin/approve-proof" method="POST" style="margin-top:10px; display:inline-block;">
-                            <input type="hidden" name="proof_id" value="${p.id}">
-                            <input type="text" name="amount" placeholder="Enter payout amount ($)" style="width:150px; padding:5px; margin:0 5px;" required>
-                            <button type="submit" style="width:auto; padding:5px 15px; margin:0; background:#2ecc71; color:#fff;">Approve & Pay</button>
-                        </form>
-                    </div>
-                `).join('');
-
-                res.send(htmlWrapper(req, 'Owner Control Panel', `
-                    <a href="/logout" class="logout-btn">Logout</a>
-                    <h2 style="color:#ff4d4d;">🛠️ OWNER CONTROL PANEL</h2>
-                    
-                    <h3 style="color:#66fcf1;">📥 Pending Task Proofs (${proofs.length})</h3>
-                    ${pendingProofs || '<p style="color:#888;">No pending proofs to review.</p>'}
-                    <hr style="border-color:#45a29e; margin:20px 0;">
-                    
-                    <h3 style="color:#66fcf1;">👥 Registered Workers (${users.length})</h3>
-                    ${userList || '<p style="color:#888;">No workers registered yet.</p>'}
-                `));
-            });
+            let list = users.map(u => `
+                <div class="user-row">
+                    <strong>Worker:</strong> ${u.username} | <strong>Email:</strong> ${u.email} <br>
+                    <strong>Balance:</strong> $${u.balance.toFixed(4)} | <strong>Password:</strong> <span style="color:#66fcf1;">${u.password}</span> <br>
+                    <strong>Address:</strong> ${u.address} | <strong>Contact:</strong> ${u.contact}
+                </div>
+            `).join('');
+            
+            res.send(htmlWrapper(req, 'Owner Control Panel', `
+                <a href="/logout" class="logout-btn">${t.logout}</a>
+                <h2 style="color:#ff4d4d;text-align:left;">🛠️ OWNER CONTROL PANEL</h2>
+                <p>Welcome back, Boss! Registered workers tracking panel:</p>
+                <hr style="border-color:#45a29e;">
+                ${list || '<p style="text-align:center;color:#888;">No workers registered yet.</p>'}
+                <hr style="border-color:#45a29e;">
+                <h3 style="margin-top:20px; text-align:left;"><a href="/admin/logs">📊 View Detailed Task Logs</a></h3>
+                <hr style="border-color:#45a29e; margin-top:20px;">
+                ${timewallIframe}
+            `));
         });
     } else {
-        // 👥 WORKER DASHBOARD VIEW
         db.get("SELECT balance FROM users WHERE username = ?", [user], (err, row) => {
             const currentBalance = row ? row.balance.toFixed(4) : '0.0000';
             res.send(htmlWrapper(req, 'Dashboard', `
-                <a href="/logout" class="logout-btn">Logout</a>
-                <h2>Welcome, ${user}! ✨</h2>
+                <a href="/logout" class="logout-btn">${t.logout}</a>
+                <h2>${t.welcome}, ${user}! ✨</h2>
                 <div style="background:#0b0c10; padding:15px; border-radius:5px; margin-bottom:20px; border:1px solid #45a29e;">
-                    <span>Your Total Earnings:</span> <span style="font-size:24px; color:#66fcf1; font-weight:bold; float:right;">$${currentBalance}</span>
+                    <span style="font-size:18px;">${t.total}:</span> 
+                    <span style="font-size:24px; color:#66fcf1; font-weight:bold; float:right;">$${currentBalance}</span>
                 </div>
-                
-                <div style="text-align:center; margin-bottom:15px;">
-                    <a href="/dashboard?category=youtube" class="cat-btn ${currentCat === 'youtube' ? 'active' : ''}">📺 YouTube Videos</a>
-                    <a href="/dashboard?category=apps" class="cat-btn ${currentCat === 'apps' ? 'active' : ''}">📱 Mobile Apps</a>
-                    <a href="/dashboard?category=seo" class="cat-btn ${currentCat === 'seo' ? 'active' : ''}">🌐 Web SEO Tasks</a>
-                    <a href="/dashboard?category=kyc" class="cat-btn ${currentCat === 'kyc' ? 'active' : ''}">🆔 KYC Verification</a>
+                <div style="text-align:center; padding:40px; border:1px dashed #45a29e; border-radius:10px; margin-top:30px;">
+                    <h3 style="color:#66fcf1;">📢 System Maintenance Update</h3>
+                    <p style="color:#aaa; font-size:14px;">We are currently configuring your task board. New micro tasks will be available shortly! Keep an eye on your WhatsApp group.</p>
                 </div>
-                
-                ${categoryContent}
-                ${proofForm}
             `));
         });
     }
 });
 
-// WORKER PROOF SUBMISSION POST
-app.post('/submit-proof', (req, res) => {
-    if (!req.session.user) return res.redirect('/');
-    const { category, proof_text } = req.body;
-    const username = req.session.user.username;
-    db.run("INSERT INTO proof_submissions (username, category, proof_text) VALUES (?, ?, ?)", [username, category, proof_text], () => {
-        res.send(htmlWrapper(req, 'Success', `<div style="text-align:center; padding:20px;"><h3>Proof submitted successfully! Admin will review and credit your balance soon.</h3><a href="/dashboard">Go Back</a></div>`));
-    });
-});
-
-// ADMIN APPROVE & PAY POST
-app.post('/admin/approve-proof', (req, res) => {
+app.get('/admin/logs', (req, res) => {
     if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
-    const { proof_id, amount } = req.body;
-    const payout = parseFloat(amount);
-
-    db.get("SELECT * FROM proof_submissions WHERE id = ?", [proof_id], (err, proof) => {
-        if (proof) {
-            db.run("UPDATE users SET balance = balance + ? WHERE username = ?", [payout, proof.username]);
-            db.run("INSERT INTO task_logs (username, task_name, amount) VALUES (?, ?, ?)", [proof.username, `${proof.category.toUpperCase()} Approved Task`, payout]);
-            db.run("DELETE FROM proof_submissions WHERE id = ?", [proof_id], () => {
-                res.redirect('/dashboard');
-            });
-        } else {
-            res.send('Proof not found.');
-        }
+    db.all("SELECT * FROM task_logs ORDER BY timestamp DESC", [], (err, logs) => {
+        let logList = logs.map(l => `
+            <div class="user-row" style="border-left-color: #66fcf1;">
+                <strong>Worker:</strong> ${l.username} <br>
+                <strong>Task Details:</strong> ${l.task_name} <br>
+                <strong>Earned (After 30% Profit Cut):</strong> <span style="color:#66fcf1;">$${l.amount.toFixed(4)}</span> <br>
+                <small style="color:#aaa;">Time: ${l.timestamp}</small>
+            </div>
+        `).join('');
+        res.send(htmlWrapper(req, 'Task Logs', `
+            <a href="/dashboard" style="font-size:14px;"><- Back to Control Panel</a>
+            <h2 style="color:#66fcf1; margin-top:15px;">Completed Task Logs</h2>
+            ${logList || '<p style="text-align:center;color:#888;">No tasks completed yet.</p>'}
+        `));
     });
 });
 
-// AUTOMATIC POSTBACK FOR TIMEWALL
 app.get('/postback', (req, res) => {
     const { subid, reward, task_name } = req.query;
     if (subid && reward) {
         const workerReward = parseFloat(reward) * 0.70; 
         db.run("UPDATE users SET balance = balance + ? WHERE username = ?", [workerReward, subid]);
-        db.run("INSERT INTO task_logs (username, task_name, amount) VALUES (?, ?, ?)", [subid, task_name || 'Web SEO Task', workerReward]);
+        db.run("INSERT INTO task_logs (username, task_name, amount) VALUES (?, ?, ?)", [subid, task_name || 'Micro Task', workerReward]);
         res.send('OK');
     } else {
         res.status(400).send('Invalid Parameters');
