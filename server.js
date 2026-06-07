@@ -1,14 +1,12 @@
-ඔයා ඉල්ලපු දේ පැහැදිලියි. ඔයාගේ දැනට තියෙන Dashboard එකේ Admin section එකට, **ප්‍රධාන Offerwall 3ට අමතරව තවත් වෙනම CPA Links (CPA Grip, MaxBounty, CPALead) ටිකක් එකතු කරගන්න පුළුවන් විදිහට** මම මේ Code එක වෙනස් කළා.
-මම මෙතනට **cpa_offers** කියන අලුත් Table එකත්, ඒකෙන් Links ටික Dashboard එකේ පෙන්වන Logic එකත් එකතු කළා. **වෙන කිසිම දෙයක් මම වෙනස් කළේ නැහැ.**
-මෙන්න ඔයාගේ Updated Code එක:
-```javascript
 const express = require('express');
 const session = require('express-session');
 const bodyParser = require('body-parser');
 const sqlite3 = require('sqlite3').verbose();
 
 const app = express();
-const db = new sqlite3.Database('/tmp/galaxy.db'); 
+
+// 🛠️ VERCEL FIX: Memory Database එකක් භාවිතා කිරීම (ගොනු හදන්නේ නැත, RAM එකේ රන් වේ)
+const db = new sqlite3.Database(':memory:'); 
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
@@ -51,7 +49,6 @@ const htmlWrapper = (req, title, content) => {
 // ROUTES
 app.get('/', (req, res) => { res.redirect('/dashboard'); });
 
-// ADMIN: UPDATE WALLS & CPA
 app.post('/admin/update-walls', (req, res) => {
     if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
     const { w1, w2, w3 } = req.body;
@@ -130,5 +127,3 @@ app.get('/postback', (req, res) => {
 });
 
 module.exports = app;
-
-```
