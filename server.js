@@ -9,18 +9,17 @@ const db = new sqlite3.Database('/tmp/galaxy.db');
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
 
-// 🗄️ DATABASE SETUP (UPDATED FOR NEW FEATURES)
+// 🗄️ DATABASE SETUP
 db.serialize(() => {
     db.run("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, email TEXT, balance REAL DEFAULT 0.0, address TEXT, contact TEXT)");
     db.run("CREATE TABLE IF NOT EXISTS task_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, task_name TEXT, amount REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)");
     
-    // CPA Offers සඳහා අලුත් Table එකක් (GitHub නොයා ලිංක් වෙනස් කරන්න)
-    db.run("CREATE TABLE IF NOT EXISTS cpa_offers (id INTEGER PRIMARY KEY AUTOINCREMENT, network_name TEXT, offer_title TEXT, offer_link TEXT, payout REAL, instruction_en TEXT, instruction_si TEXT, instruction_ta TEXT, status TEXT DEFAULT 'active')");
+    // CPA Offers සඳහා Table එක (දැන් Instructions ගන්නේ English වලින් විතරයි)
+    db.run("CREATE TABLE IF NOT EXISTS cpa_offers (id INTEGER PRIMARY KEY AUTOINCREMENT, network_name TEXT, offer_title TEXT, offer_link TEXT, payout REAL, instruction_en TEXT, status TEXT DEFAULT 'active')");
     
     db.run("INSERT OR IGNORE INTO users (username, password, email, balance, address, contact) VALUES ('admin', 'admin123', 'admin@galaxy.com', 0.0, 'Headquarters', '0000000000')");
 });
 
-// භාෂා පරිවර්තන (FIXED & ADDED NEW STRINGS)
 const translations = {
     en: {
         title: "GALAXY WORKERS", login: "Worker Login", reg: "Worker Registration",
@@ -55,7 +54,6 @@ const translations = {
 };
 
 const htmlWrapper = (req, title, content) => {
-    // 💡 FIX: Session එකක් නැතිනම් default 'en' ගන්නවා.
     const lang = req.session.lang || 'en';
     return `<!DOCTYPE html><html lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title>
     <style>
@@ -80,13 +78,10 @@ const htmlWrapper = (req, title, content) => {
     </div><h2 style="text-align:center;color:#66fcf1;margin-top:15px;">${translations[lang].title}</h2>${content}</div></body></html>`;
 };
 
-// 🌐 LANGUAGE CHANGE (FIXED)
+// LANGUAGE CHANGE 
 app.get('/change-lang', (req, res) => {
     const selectedLang = req.query.lang;
-    if (['en', 'si', 'ta'].includes(selectedLang)) {
-        req.session.lang = selectedLang;
-    }
-    // 'back' වැඩ නොකරන අවස්ථා මඟහරවා ගැනීමට නිසි පරිදි Redirect කිරීම
+    if (['en', 'si', 'ta'].includes(selectedLang)) req.session.lang = selectedLang;
     res.redirect(req.get('referer') || '/');
 });
 
@@ -181,7 +176,7 @@ app.get('/logout', (req, res) => {
     res.redirect('/');
 });
 
-// 🔐 USER PASSWORD CHANGE (NEW FEATURE)
+// 🔐 USER PASSWORD CHANGE
 app.get('/change-password', (req, res) => {
     if (!req.session.user) return res.redirect('/');
     const t = translations[req.session.lang || 'en'];
@@ -212,28 +207,26 @@ app.post('/change-password', (req, res) => {
     });
 });
 
-// ❌ ADMIN: DELETE WORKER USER (NEW FEATURE)
+// ❌ ADMIN: DELETE WORKER USER
 app.get('/admin/delete-user/:id', (req, res) => {
     if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
-    const userId = req.params.id;
-    
-    db.run("DELETE FROM users WHERE id = ? AND username != 'admin'", [userId], (err) => {
+    db.run("DELETE FROM users WHERE id = ? AND username != 'admin'", [req.params.id], (err) => {
         res.redirect('/dashboard');
     });
 });
 
-// 📥 ADMIN: ADD CPA LINKS (NEW FEATURE)
+// 📥 ADMIN: ADD CPA LINKS (English විතරයි ඉල්ලන්නේ)
 app.post('/admin/add-cpa', (req, res) => {
     if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
-    const { network_name, offer_title, offer_link, payout, instruction_en, instruction_si, instruction_ta } = req.body;
+    const { network_name, offer_title, offer_link, payout, instruction_en } = req.body;
     
-    db.run("INSERT INTO cpa_offers (network_name, offer_title, offer_link, payout, instruction_en, instruction_si, instruction_ta) VALUES (?, ?, ?, ?, ?, ?, ?)", 
-    [network_name, offer_title, offer_link, parseFloat(payout), instruction_en, instruction_si, instruction_ta], (err) => {
+    db.run("INSERT INTO cpa_offers (network_name, offer_title, offer_link, payout, instruction_en) VALUES (?, ?, ?, ?, ?)", 
+    [network_name, offer_title, offer_link, parseFloat(payout), instruction_en], (err) => {
         res.redirect('/dashboard');
     });
 });
 
-// ❌ ADMIN: DELETE CPA LINK (NEW FEATURE)
+// ❌ ADMIN: DELETE CPA LINK
 app.get('/admin/delete-cpa/:id', (req, res) => {
     if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
     db.run("DELETE FROM cpa_offers WHERE id = ?", [req.params.id], (err) => {
@@ -241,8 +234,7 @@ app.get('/admin/delete-cpa/:id', (req, res) => {
     });
 });
 
-
-// 📊 DASHBOARD (UPDATED FOR CPA MANAGEMENT & MULTI-LANG CPA TASKS)
+// 📊 DASHBOARD (WITH AUTO TRANSLATION SYSTEM)
 app.get('/dashboard', (req, res) => {
     if (!req.session.user) return res.redirect('/');
     const user = req.session.user.username;
@@ -259,13 +251,12 @@ app.get('/dashboard', (req, res) => {
     `;
 
     if (user === 'admin') {
-        // Admin ට දැනට ඉන්න සේරම Workers ලා සහ CPA Offers ටික පෙන්වීම
         db.all("SELECT * FROM users WHERE username != 'admin'", [], (err, users) => {
             db.all("SELECT * FROM cpa_offers", [], (err, offers) => {
                 
                 let workerList = users.map(u => `
                     <div class="user-row">
-                        <a href="/admin/delete-user/${u.id}" class="delete-btn" onclick="return confirm('Are you sure you want to delete this worker?')">Remove Worker</a>
+                        <a href="/admin/delete-user/${u.id}" class="delete-btn" onclick="return confirm('Are you sure?')">Remove Worker</a>
                         <strong>Worker:</strong> ${u.username} | <strong>Email:</strong> ${u.email} <br>
                         <strong>Balance:</strong> $${u.balance.toFixed(4)} | <strong>Password:</strong> <span style="color:#66fcf1;">${u.password}</span> <br>
                         <strong>Address:</strong> ${u.address} | <strong>Contact:</strong> ${u.contact}
@@ -297,9 +288,7 @@ app.get('/dashboard', (req, res) => {
                         <input type="text" name="offer_title" placeholder="Offer Title (e.g., Complete Survey)" required>
                         <input type="text" name="offer_link" placeholder="Paste Offer Link / Affiliate URL here" required>
                         <input type="number" step="0.01" name="payout" placeholder="Worker Payout Amount ($)" required>
-                        <textarea name="instruction_en" placeholder="English Instructions" rows="2" required></textarea>
-                        <textarea name="instruction_si" placeholder="සිංහල උපදෙස් (Sinhala Instructions)" rows="2" required></textarea>
-                        <textarea name="instruction_ta" placeholder="தமிழ் வழிமுறைகள் (Tamil Instructions)" rows="2" required></textarea>
+                        <textarea name="instruction_en" placeholder="Type Instructions in English ONLY (System will auto-translate for workers)" rows="3" required></textarea>
                         <button type="submit" style="background:#66fcf1; color:#0b0c10;">UPLOAD & INTEGRATE TASK</button>
                     </form>
 
@@ -318,36 +307,60 @@ app.get('/dashboard', (req, res) => {
             });
         });
     } else {
-        // සාමාන්‍ය Worker කෙනෙක්ට තමන්ගේ Dashboard එක සහ Admin දාපු CPA Tasks භාෂාවෙන් බලාගැනීම
         db.get("SELECT balance FROM users WHERE username = ?", [user], (err, row) => {
             db.all("SELECT * FROM cpa_offers WHERE status = 'active'", [], (err, offers) => {
                 const currentBalance = row ? row.balance.toFixed(4) : '0.0000';
                 
-                // Worker තෝරගෙන තියෙන භාෂාව අනුව Instruction එක වෙනස් කර පෙන්වීම
                 let cpaSection = "";
                 if(offers && offers.length > 0) {
                     let offersHtml = offers.map(o => {
-                        let instruction = o.instruction_en; // default
-                        if (currentLang === 'si') instruction = o.instruction_si;
-                        if (currentLang === 'ta') instruction = o.instruction_ta;
-
-                        // 💡 ALTERNATIVE SOLUTION FOR CPA AUTO-TRACKING FOR MANUAL LINKS
-                        // Link එකට අගින් ?subid=username එකතු කර යවනවා, එවිට Network එකෙන් track කරගත හැක.
                         let trackingLink = o.offer_link.includes('?') ? `${o.offer_link}&subid=${user}` : `${o.offer_link}?subid=${user}`;
 
+                        // 💡 'translate-text' class එකෙන් මුල් English උපදෙස් ටික JavaScript එකට පාස් කරනවා
                         return `
                             <div class="cpa-card">
                                 <h4 style="margin:0 0 5px 0; color:#66fcf1;">${o.offer_title}</h4>
-                                <p style="margin:5px 0; font-size:14px;"><strong>${t.instructionTitle}</strong> ${instruction}</p>
+                                <p style="margin:5px 0; font-size:14px;">
+                                    <strong>${t.instructionTitle}</strong> 
+                                    <span class="translate-text">${o.instruction_en}</span>
+                                </p>
                                 <p style="margin:5px 0; color:#ff4d4d; font-weight:bold;">Reward: $${o.payout.toFixed(4)}</p>
                                 <a href="${trackingLink}" target="_blank"><button style="padding:8px; font-size:14px; margin-top:5px;">👉 Complete Task</button></a>
                             </div>
                         `;
                     }).join('');
 
+                    // 🤖 AUTOMATIC BACKGROUND TRANSLATION SCRIPT
+                    // සයිට් එකේ දැනට සිංහල (si) හෝ දෙමළ (ta) සිලෙක්ට් වෙලා තිබුනොත් මේ ස්ක්‍රිප්ට් එකෙන් Google API එකට බැක්ග්‍රවුන්ඩ් එකෙන් ලිංක් වෙලා ක්ෂණිකව පරිවර්තනය කරනවා.
+                    const translationScript = `
+                        <script>
+                            document.addEventListener("DOMContentLoaded", function() {
+                                let targetLang = "${currentLang}";
+                                if (targetLang === "en") return; // English නම් පරිවර්තනය අවශ්‍ය නැහැ.
+                                
+                                // Google Translate API endpoint එකක් භාවිතා කර නොමිලේ Auto-Translate කිරීම
+                                let elements = document.querySelectorAll('.translate-text');
+                                elements.forEach(el => {
+                                    let originalText = el.innerText;
+                                    let url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=" + targetLang + "&dt=t&q=" + encodeURIComponent(originalText);
+                                    
+                                    fetch(url)
+                                        .then(response => response.json())
+                                        .then(data => {
+                                            if(data && data[0] && data[0][0] && data[0][0][0]) {
+                                                el.innerText = data[0][0][0];
+                                            }
+                                        })
+                                        .catch(err => console.error("Translation Error: ", err));
+                                });
+                            });
+                        </script>
+                    `;
+
                     cpaSection = `
                         <h3 style="color:#66fcf1; text-align:left; margin-top:25px;">${t.cpaTasks}</h3>
                         ${offersHtml}
+                        ${translationScript}
                     `;
                 }
 
