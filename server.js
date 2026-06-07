@@ -9,13 +9,21 @@ const db = new sqlite3.Database('/tmp/galaxy.db');
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
 
-// 🗄️ DATABASE SETUP
+// 🗄️ DATABASE SETUP & TABLE UPDATES
 db.serialize(() => {
     db.run("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, email TEXT, balance REAL DEFAULT 0.0, address TEXT, contact TEXT)");
     db.run("CREATE TABLE IF NOT EXISTS task_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, task_name TEXT, amount REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)");
     db.run("CREATE TABLE IF NOT EXISTS cpa_offers (id INTEGER PRIMARY KEY AUTOINCREMENT, network_name TEXT, offer_title TEXT, offer_link TEXT, payout REAL, instruction_en TEXT, status TEXT DEFAULT 'active')");
     
+    // ⚙️ Offerwall ලින්ක්ස් ඩයිනමික්ව සේව් කරන්න අලුත් ටේබල් එකක්
+    db.run("CREATE TABLE IF NOT EXISTS offerwall_settings (id INTEGER PRIMARY KEY, wall_name TEXT, wall_url TEXT)");
+    
+    // Default Admin Account
     db.run("INSERT OR IGNORE INTO users (username, password, email, balance, address, contact) VALUES ('admin', 'admin123', 'admin@galaxy.com', 0.0, 'Headquarters', '0000000000')");
+    
+    // මුලින්ම පාවිච්චි කරන්න ඩෙමෝ ඔෆර්වෝල් 2ක් ඇතුළත් කිරීම (පසුව ඇඩ්මින් එකෙන් වෙනස් කල හැක)
+    db.run("INSERT OR IGNORE INTO offerwall_settings (id, wall_name, wall_url) VALUES (1, 'Galaxy Core Tasks', 'https://timewall.io/embed/your-widget-id')");
+    db.run("INSERT OR IGNORE INTO offerwall_settings (id, wall_name, wall_url) VALUES (2, 'Galaxy Premium Wall', 'https://www.cpalead.com/offerwall/embed/your-id')");
 });
 
 const translations = {
@@ -23,8 +31,8 @@ const translations = {
         title: "GALAXY WORKERS", login: "Worker Login", reg: "Worker Registration",
         user: "Username", pass: "Password", email: "Email Address", addr: "Full Address", phone: "Contact Number",
         btnLog: "LOG IN", btnReg: "REGISTER", noAcc: "Don't have an account?", regHere: "Register here",
-        backLog: "Back to Login", welcome: "Welcome", total: "Your Total Earnings", tasks: "Available Micro Tasks 👇",
-        subText: "Complete the tasks below. Your earnings will automatically add to your balance.", logout: "Logout",
+        backLog: "Back to Login", welcome: "Welcome", total: "Your Total Earnings", tasks: "Available Official Tasks 👇",
+        subText: "Complete the tasks in our official walls below. Earnings will add to your balance automatically.", logout: "Logout",
         forgot: "Forgot Password?", recoverTitle: "Recover Password", btnRecover: "RECOVER",
         changePassTitle: "Change Password", oldPass: "Old Password", newPass: "New Password", btnUpdate: "UPDATE PASSWORD",
         cpaTasks: "🔥 Premium Bonus Tasks", instructionTitle: "Instructions:"
@@ -33,8 +41,8 @@ const translations = {
         title: "GALAXY WORKERS", login: "සේවක ඇතුල්වීම", reg: "සේවක ලියාපදිංචිය",
         user: "පරිශීලක නාමය (Username)", pass: "මුරපදය (Password)", email: "ඊමේල් ලිපිනය (Email)", addr: "සම්පූර්ණ ලිපිනය", phone: "WhatsApp / දුරකථන අංකය",
         btnLog: "ඇතුල් වන්න", btnReg: "ලියාපදිංචි වන්න", noAcc: "ගිණුමක් නොමැතිද?", regHere: "මෙහි ලියාපදිංචි වන්න",
-        backLog: "නැවත මුල් පිටුවට", welcome: "ආයුබෝවන්", total: "ඔබේ මුළු උපයනය", tasks: "කිරීමට ඇති සරල වැඩ (Tasks) 👇",
-        subText: "පහත ඇති Tasks සම්පූර්ණ කරන්න. ඔබ උපයන මුදල් ස්වයංක්‍රීයවම ගිණුමට එකතු වේ.", logout: "ඉවත් වන්න (Logout)",
+        backLog: "නැවත මුල් පිටුවට", welcome: "ආයුබෝවන්", total: "ඔබේ මුළු උපයනය", tasks: "GALAXY නිල කාර්යයන් (Official Tasks) 👇",
+        subText: "පහත දැක්වෙන අපගේ නිල පැනල් මඟින් Tasks සම්පූර්ණ කරන්න. ඔබ උපයන මුදල් ස්වයංක්‍රීයවම ගිණුමට එකතු වේ.", logout: "ඉවත් වන්න (Logout)",
         forgot: "මුරපදය අමතකද? (Forgot Password)", recoverTitle: "මුරපදය නැවත ලබාගැනීම", btnRecover: "මුරපදය පෙන්වන්න",
         changePassTitle: "මුරපදය වෙනස් කිරීම", oldPass: "පරණ මුරපදය", newPass: "අලුත් මුරපදය", btnUpdate: "මුරපදය වෙනස් කරන්න",
         cpaTasks: "🔥 විශේෂ Premium කාර්යයන් (Bonus Tasks)", instructionTitle: "උපදෙස්:"
@@ -44,7 +52,7 @@ const translations = {
         user: "பயனர் பெயர் (Username)", pass: "கடவுச்சொல் (Password)", email: "மின்னஞ்சல் முகவரி", addr: "முழு முகவரி", phone: "தொலைபேசி எண்",
         btnLog: "உள்நுழைக", btnReg: "பதிவு செய்க", noAcc: "கணக்கு இல்லையா?", regHere: "இங்கே பதிவு செய்யவும்",
         backLog: "மீண்டும் உள்நுழைய", welcome: "வரவேற்கிறோம்", total: "உங்கள் மொத்த வருவாய்", tasks: "கிடைக்கக்கூடிய பணிகள் 👇",
-        subText: "கீழே உள்ள பணிகளை முடிக்கவும். உங்கள் வருவாய் தானாகவே உங்கள் கணக்கில் சேர்க்கப்படும்.", logout: "வெளியேறு (Logout)",
+        subText: "கீழே உள்ள அதிகாரப்பூர்வ பணிகளை முடிக்கவும். உங்கள் வருவாய் தானாகவே உங்கள் கணக்கில் சேர்க்கப்படும்.", logout: "வெளியேறு (Logout)",
         forgot: "கடவுச்சொல் மறந்துவிட்டதா?", recoverTitle: "கடவுச்சொல்லை மீட்டெடுக்கவும்", btnRecover: "மீட்டெடுப்போம்",
         changePassTitle: "கடவுச்சொல்லை மாற்றவும்", oldPass: "பழைய கடவுச்சொல்", newPass: "புதிய கடவுச்சொல்", btnUpdate: "மாற்றவும்",
         cpaTasks: "🔥 பிரீமியம் போனஸ் பணிகள்", instructionTitle: "வழிமுறைகள்:"
@@ -66,6 +74,9 @@ const htmlWrapper = (req, title, content) => {
         .cpa-card{background:#141d26; padding:15px; margin:15px 0; border-radius:8px; border:1px solid #66fcf1; text-align:left;}
         a{color:#66fcf1;text-decoration:none;} .logout-btn{background:#ff4d4d;color:#fff;width:auto;padding:5px 10px;font-size:12px;float:right;margin-left:10px;}
         .delete-btn{background:#ff4d4d; color:#fff; padding:5px 10px; border:none; border-radius:3px; cursor:pointer; float:right; font-size:12px;}
+        .wall-tab-container { display: flex; gap: 10px; margin-top: 20px; margin-bottom: 10px; }
+        .wall-tab { background: #0b0c10; color: #fff; border: 1px solid #45a29e; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; flex: 1; text-align: center; }
+        .wall-tab.active { background: #45a29e; color: #0b0c10; border-color: #66fcf1; }
     </style></head><body><div class="container">
     <div class="lang-selector">
         <select onchange="window.location.href='/change-lang?lang=' + this.value}">
@@ -105,7 +116,6 @@ app.get('/', (req, res) => {
 app.post('/login', (req, res) => {
     const { username, password } = req.body;
     
-    // 💡 FIXED: Admin ලොගින් එක ඩේටාබේස් එකෙන් බලන්නේ නැතුව කෙලින්ම Bypass කලා පාස්වර්ඩ් අවුල නැතිවෙන්න.
     if (username === 'admin' && password === 'admin123') {
         req.session.user = { id: 0, username: 'admin', email: 'admin@galaxy.com' };
         return res.redirect('/dashboard');
@@ -232,6 +242,18 @@ app.post('/admin/add-cpa', (req, res) => {
     });
 });
 
+// 📥 ADMIN: UPDATE OFFERWALL CONFIGURATIONS (SECRET MANAGER)
+app.post('/admin/update-walls', (req, res) => {
+    if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
+    const { wall1_url, wall2_url } = req.body;
+    
+    db.run("UPDATE offerwall_settings SET wall_url = ? WHERE id = 1", [wall1_url], () => {
+        db.run("UPDATE offerwall_settings SET wall_url = ? WHERE id = 2", [wall2_url], () => {
+            res.redirect('/dashboard');
+        });
+    });
+});
+
 // ❌ ADMIN: DELETE CPA LINK
 app.get('/admin/delete-cpa/:id', (req, res) => {
     if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
@@ -240,21 +262,12 @@ app.get('/admin/delete-cpa/:id', (req, res) => {
     });
 });
 
-// 📊 DASHBOARD (PROMISE FIXED)
+// 📊 DASHBOARD 
 app.get('/dashboard', (req, res) => {
     if (!req.session.user) return res.redirect('/');
     const user = req.session.user.username;
     const currentLang = req.session.lang || 'en';
     const t = translations[currentLang];
-
-    const timewallWidgetBaseURL = "https://timewall.io/embed/your-widget-id"; 
-    const finalIframeSrc = `${timewallWidgetBaseURL}?subid=${user}`;
-
-    const timewallIframe = `
-        <h3 style="color:#66fcf1; margin-top:30px; text-align:left;">${t.tasks}</h3>
-        <p style="font-size:13px; color:#aaa; text-align:left;">${t.subText}</p>
-        <iframe src="${finalIframeSrc}" width="100%" height="600px" frameborder="0" style="border-radius:8px; background:#fff; margin-top:15px;"></iframe>
-    `;
 
     if (user === 'admin') {
         const getUsers = new Promise((resolve, reject) => {
@@ -263,8 +276,14 @@ app.get('/dashboard', (req, res) => {
         const getOffers = new Promise((resolve, reject) => {
             db.all("SELECT * FROM cpa_offers", [], (err, rows) => err ? reject(err) : resolve(rows));
         });
+        const getWalls = new Promise((resolve, reject) => {
+            db.all("SELECT * FROM offerwall_settings", [], (err, rows) => err ? reject(err) : resolve(rows));
+        });
 
-        Promise.all([getUsers, getOffers]).then(([users, offers]) => {
+        Promise.all([getUsers, getOffers, getWalls]).then(([users, offers, walls]) => {
+            let wall1 = walls.find(w => w.id === 1) || { wall_url: '' };
+            let wall2 = walls.find(w => w.id === 2) || { wall_url: '' };
+
             let workerList = (users || []).map(u => `
                 <div class="user-row">
                     <a href="/admin/delete-user/${u.id}" class="delete-btn" onclick="return confirm('Are you sure you want to remove this worker?')">Remove Worker</a>
@@ -287,8 +306,22 @@ app.get('/dashboard', (req, res) => {
                 <h2 style="color:#ff4d4d;text-align:left;">🛠️ OWNER CONTROL PANEL</h2>
                 <p>Welcome back, Boss!</p>
                 
+                <!-- 🤫 SECRET OFFERWALL MANAGER -->
                 <hr style="border-color:#45a29e;">
-                <h3>➕ ADD CPA / CPALEAD / MAXBOUNTY LINKS</h3>
+                <h3 style="color:#66fcf1;">⚙️ GALAXY AUTOMATIC OFFERWALL MANAGER</h3>
+                <p style="font-size:13px; color:#aaa;">CPA Networks වලින් හම්බෙන Global Offerwall Iframe Links හෝ Widgets ලින්ක්ස් මෙතනට දාන්න. මේවා Workers ලට පේන්නේ උඹේම පැනල් වගේ (Masked) රහස්‍යවයි.</p>
+                <form action="/admin/update-walls" method="POST" style="background:#141d26; padding:15px; border-radius:8px; margin-bottom:20px; border:1px solid #66fcf1;">
+                    <label style="font-weight:bold; color:#fff;">Wall 1 URL (Will display as 'Galaxy Core Tasks'):</label>
+                    <input type="text" name="wall1_url" value="${wall1.wall_url}" placeholder="Paste Timewall URL or other network wall url..." required>
+                    
+                    <label style="font-weight:bold; color:#fff; margin-top:10px; display:block;">Wall 2 URL (Will display as 'Galaxy Premium Wall'):</label>
+                    <input type="text" name="wall2_url" value="${wall2.wall_url}" placeholder="Paste CPALead / MyLead Offerwall iframe URL here..." required>
+                    
+                    <button type="submit" style="background:#66fcf1; color:#0b0c10;">💾 SAVE & SECURE WALLS</button>
+                </form>
+
+                <hr style="border-color:#45a29e;">
+                <h3>➕ ADD MANUALLY MANAGED LINKS</h3>
                 <form action="/admin/add-cpa" method="POST" style="background:#141d26; padding:15px; border-radius:8px;">
                     <select name="network_name" required>
                         <option value="CPAGrip">CPAGrip</option>
@@ -300,7 +333,7 @@ app.get('/dashboard', (req, res) => {
                     <input type="text" name="offer_link" placeholder="Paste Offer Link / Affiliate URL here" required>
                     <input type="number" step="0.01" name="payout" placeholder="Worker Payout Amount ($)" required>
                     <textarea name="instruction_en" placeholder="Type Instructions in English ONLY" rows="3" required></textarea>
-                    <button type="submit" style="background:#66fcf1; color:#0b0c10;">UPLOAD & INTEGRATE TASK</button>
+                    <button type="submit" style="background:#45a29e; color:#0b0c10;">UPLOAD & INTEGRATE TASK</button>
                 </form>
 
                 <h3 style="margin-top:20px;">🔗 Active Managed CPA Offers</h3>
@@ -314,81 +347,111 @@ app.get('/dashboard', (req, res) => {
                 
                 <hr style="border-color:#45a29e;">
                 <h3 style="margin-top:20px; text-align:left;"><a href="/admin/logs">📊 View Detailed Task Logs</a></h3>
-                <hr style="border-color:#45a29e; margin-top:20px;">
-                ${timewallIframe}
             `));
         }).catch(err => res.send("Database Error: " + err.message));
 
     } else {
         db.get("SELECT balance FROM users WHERE username = ?", [user], (err, row) => {
             db.all("SELECT * FROM cpa_offers WHERE status = 'active'", [], (err, offers) => {
-                const currentBalance = row ? row.balance.toFixed(4) : '0.0000';
-                
-                let cpaSection = "";
-                if(offers && offers.length > 0) {
-                    let offersHtml = offers.map(o => {
-                        let trackingLink = o.offer_link.includes('?') ? `${o.offer_link}&subid=${user}` : `${o.offer_link}?subid=${user}`;
+                db.all("SELECT * FROM offerwall_settings", [], (err, walls) => {
+                    const currentBalance = row ? row.balance.toFixed(4) : '0.0000';
+                    
+                    let wall1 = walls.find(w => w.id === 1) || { wall_url: '' };
+                    let wall2 = walls.find(w => w.id === 2) || { wall_url: '' };
 
-                        return `
-                            <div class="cpa-card">
-                                <h4 style="margin:0 0 5px 0; color:#66fcf1;">${o.offer_title}</h4>
-                                <p style="margin:5px 0; font-size:14px;">
-                                    <strong>${t.instructionTitle}</strong> 
-                                    <span class="translate-text">${o.instruction_en}</span>
-                                </p>
-                                <p style="margin:5px 0; color:#ff4d4d; font-weight:bold;">Reward: $${o.payout.toFixed(4)}</p>
-                                <a href="${trackingLink}" target="_blank"><button style="padding:8px; font-size:14px; margin-top:5px;">👉 Complete Task</button></a>
-                            </div>
-                        `;
-                    }).join('');
+                    // Auto inject subid safely to avoid leaking details
+                    let finalSrc1 = wall1.wall_url.includes('?') ? `${wall1.wall_url}&subid=${user}` : `${wall1.wall_url}?subid=${user}`;
+                    let finalSrc2 = wall2.wall_url.includes('?') ? `${wall2.wall_url}&subid=${user}` : `${wall2.wall_url}?subid=${user}`;
 
-                    const translationScript = `
+                    const dynamicIframeTabs = `
+                        <h3 style="color:#66fcf1; margin-top:30px; text-align:left;">${t.tasks}</h3>
+                        <p style="font-size:13px; color:#aaa; text-align:left;">${t.subText}</p>
+                        
+                        <div class="wall-tab-container">
+                            <div class="wall-tab active" onclick="switchWall('wall1', this)">🌌 Galaxy Core Tasks</div>
+                            <div class="wall-tab" onclick="switchWall('wall2', this)">💎 Galaxy Premium Wall</div>
+                        </div>
+
+                        <div id="wall1" class="wall-frame-wrapper" style="display:block;">
+                            <iframe src="${finalSrc1}" width="100%" height="600px" frameborder="0" style="border-radius:8px; background:#fff; margin-top:10px;"></iframe>
+                        </div>
+                        <div id="wall2" class="wall-frame-wrapper" style="display:none;">
+                            <iframe src="${finalSrc2}" width="100%" height="600px" frameborder="0" style="border-radius:8px; background:#fff; margin-top:10px;"></iframe>
+                        </div>
+
                         <script>
-                            document.addEventListener("DOMContentLoaded", function() {
-                                let targetLang = "${currentLang}";
-                                if (targetLang === "en") return; 
+                            function switchWall(wallId, tabElement) {
+                                document.querySelectorAll('.wall-frame-wrapper').forEach(el => el.style.display = 'none');
+                                document.querySelectorAll('.wall-tab').forEach(el => el.classList.remove('active'));
                                 
-                                let elements = document.querySelectorAll('.translate-text');
-                                elements.forEach(el => {
-                                    let originalText = el.innerText;
-                                    let url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=" + targetLang + "&dt=t&q=" + encodeURIComponent(originalText);
-                                    
-                                    fetch(url)
-                                        .then(response => response.json())
-                                        .then(data => {
-                                            if(data && data[0] && data[0][0] && data[0][0][0]) {
-                                                el.innerText = data[0][0][0];
-                                            }
-                                        })
-                                        .catch(err => console.error("Translation Error: ", err));
-                                });
-                            });
+                                document.getElementById(wallId).style.display = 'block';
+                                tabElement.classList.add('active');
+                            }
                         </script>
                     `;
+                    
+                    let cpaSection = "";
+                    if(offers && offers.length > 0) {
+                        let offersHtml = offers.map(o => {
+                            let trackingLink = o.offer_link.includes('?') ? `${o.offer_link}&subid=${user}` : `${o.offer_link}?subid=${user}`;
 
-                    cpaSection = `
-                        <h3 style="color:#66fcf1; text-align:left; margin-top:25px;">${t.cpaTasks}</h3>
-                        ${offersHtml}
-                        ${translationScript}
-                    `;
-                }
+                            return `
+                                <div class="cpa-card">
+                                    <h4 style="margin:0 0 5px 0; color:#66fcf1;">${o.offer_title}</h4>
+                                    <p style="margin:5px 0; font-size:14px;">
+                                        <strong>${t.instructionTitle}</strong> 
+                                        <span class="translate-text">${o.instruction_en}</span>
+                                    </p>
+                                    <p style="margin:5px 0; color:#ff4d4d; font-weight:bold;">Reward: $${o.payout.toFixed(4)}</p>
+                                    <a href="${trackingLink}" target="_blank"><button style="padding:8px; font-size:14px; margin-top:5px;">👉 Complete Task</button></a>
+                                </div>
+                            `;
+                        }).join('');
 
-                res.send(htmlWrapper(req, 'Dashboard', `
-                    <a href="/logout" class="logout-btn">${t.logout}</a>
-                    <a href="/change-password" class="logout-btn" style="background:#45a29e;">🔑 Change Password</a>
-                    <h2>${t.welcome}, ${user}! ✨</h2>
-                    <div style="background:#0b0c10; padding:15px; border-radius:5px; margin-bottom:20px; border:1px solid #45a29e;">
-                        <span style="font-size:18px;">${t.total}:</span> 
-                        <span style="font-size:24px; color:#66fcf1; font-weight:bold; float:right;">$${currentBalance}</span>
-                    </div>
+                        const translationScript = `
+                            <script>
+                                document.addEventListener("DOMContentLoaded", function() {
+                                    let targetLang = "${currentLang}";
+                                    if (targetLang === "en") return; 
+                                    
+                                    let elements = document.querySelectorAll('.translate-text');
+                                    elements.forEach(el => {
+                                        let originalText = el.innerText;
+                                        let url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=" + targetLang + "&dt=t&q=" + encodeURIComponent(originalText);
+                                        
+                                        fetch(url)
+                                            .then(response => response.json())
+                                            .then(data => {
+                                                if(data && data[0] && data[0][0] && data[0][0][0]) {
+                                                    el.innerText = data[0][0][0];
+                                                }
+                                            })
+                                            .catch(err => console.error("Translation Error: ", err));
+                                    });
+                                });
+                            </script>
+                        `;
 
-                    ${cpaSection}
+                        cpaSection = `
+                            <h3 style="color:#66fcf1; text-align:left; margin-top:25px;">${t.cpaTasks}</h3>
+                            ${offersHtml}
+                            ${translationScript}
+                        `;
+                    }
 
-                    <div style="text-align:center; padding:40px; border:1px dashed #45a29e; border-radius:10px; margin-top:30px;">
-                        <h3 style="color:#66fcf1;">📢 System Maintenance Update</h3>
-                        <p style="color:#aaa; font-size:14px;">We are currently configuring your task board. New micro tasks will be available shortly! Keep an eye on your WhatsApp group.</p>
-                    </div>
-                `));
+                    res.send(htmlWrapper(req, 'Dashboard', `
+                        <a href="/logout" class="logout-btn">${t.logout}</a>
+                        <a href="/change-password" class="logout-btn" style="background:#45a29e;">🔑 Change Password</a>
+                        <h2>${t.welcome}, ${user}! ✨</h2>
+                        <div style="background:#0b0c10; padding:15px; border-radius:5px; margin-bottom:20px; border:1px solid #45a29e;">
+                            <span style="font-size:18px;">${t.total}:</span> 
+                            <span style="font-size:24px; color:#66fcf1; font-weight:bold; float:right;">$${currentBalance}</span>
+                        </div>
+
+                        ${cpaSection}
+                        ${dynamicIframeTabs}
+                    `));
+                });
             });
         });
     }
