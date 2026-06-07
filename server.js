@@ -169,6 +169,7 @@ app.get('/dashboard', (req, res) => {
     const user = req.session.user.username;
     const t = translations[req.session.lang || 'en'];
 
+    // 💡 Timewall URL එක (පස්සේ දවසක ඔයාගේ Widget ID එක ආවම 'your-widget-id' වෙනුවට දාන්න)
     const timewallWidgetBaseURL = "https://timewall.io/embed/your-widget-id"; 
     const finalIframeSrc = `${timewallWidgetBaseURL}?subid=${user}`;
 
@@ -219,21 +220,49 @@ app.get('/dashboard', (req, res) => {
     }
 });
 
+// 🔎 DETAILED LOGS WITH LIVE FILTER SEARCH
 app.get('/admin/logs', (req, res) => {
     if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
+    
     db.all("SELECT * FROM task_logs ORDER BY timestamp DESC", [], (err, logs) => {
         let logList = logs.map(l => `
-            <div class="user-row" style="border-left-color: #66fcf1;">
-                <strong>Worker:</strong> ${l.username} <br>
+            <div class="user-row log-item" data-username="${l.username.toLowerCase()}" data-task="${l.task_name.toLowerCase()}" style="border-left-color: #66fcf1;">
+                <strong>Worker:</strong> <span class="worker-name">${l.username}</span> <br>
                 <strong>Task Details:</strong> ${l.task_name} <br>
                 <strong>Earned (After 30% Profit Cut):</strong> <span style="color:#66fcf1;">$${l.amount.toFixed(4)}</span> <br>
                 <small style="color:#aaa;">Time: ${l.timestamp}</small>
             </div>
         `).join('');
+
+        const searchScript = `
+            <input type="text" id="logSearch" placeholder="🔍 Type Worker Username or Task name to filter..." style="width:95%; padding:12px; margin:15px 0; border:1px solid #66fcf1; border-radius:5px; background:#0b0c10; color:#fff;">
+            
+            <script>
+                document.getElementById('logSearch').addEventListener('input', function() {
+                    let filter = this.value.toLowerCase();
+                    let items = document.querySelectorAll('.log-item');
+                    
+                    items.forEach(function(item) {
+                        let username = item.getAttribute('data-username');
+                        let taskName = item.getAttribute('data-task');
+                        
+                        if (username.includes(filter) || taskName.includes(filter)) {
+                            item.style.display = 'block';
+                        } else {
+                            item.style.display = 'none';
+                        }
+                    });
+                });
+            </script>
+        `;
+
         res.send(htmlWrapper(req, 'Task Logs', `
             <a href="/dashboard" style="font-size:14px;"><- Back to Control Panel</a>
             <h2 style="color:#66fcf1; margin-top:15px;">Completed Task Logs</h2>
-            ${logList || '<p style="text-align:center;color:#888;">No tasks completed yet.</p>'}
+            ${searchScript}
+            <div id="logsContainer" style="margin-top:10px;">
+                ${logList || '<p style="text-align:center;color:#888;">No tasks completed yet.</p>'}
+            </div>
         `));
     });
 });
