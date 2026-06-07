@@ -4,7 +4,7 @@ const bodyParser = require('body-parser');
 const sqlite3 = require('sqlite3').verbose();
 
 const app = express();
-const db = new sqlite3.Database('./galaxy.db'); 
+const db = new sqlite3.Database('/tmp/galaxy.db'); 
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
@@ -13,7 +13,10 @@ app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUniniti
 db.serialize(() => {
     db.run("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, email TEXT, balance REAL DEFAULT 0.0, address TEXT, contact TEXT)");
     db.run("CREATE TABLE IF NOT EXISTS task_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, task_name TEXT, amount REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)");
+    
+    // CPA Integration සහ Multi-language Instructions සඳහා නව Table එකක්
     db.run("CREATE TABLE IF NOT EXISTS cpa_configs (id INTEGER PRIMARY KEY AUTOINCREMENT, network_name TEXT, embed_code TEXT, instructions_en TEXT, instructions_si TEXT, instructions_ta TEXT, is_active INTEGER DEFAULT 1)");
+
     db.run("INSERT OR IGNORE INTO users (username, password, email, balance, address, contact) VALUES ('admin', 'admin123', 'admin@galaxy.com', 0.0, 'Headquarters', '0000000000')");
 });
 
@@ -26,7 +29,7 @@ const translations = {
         subText: "Complete the tasks below. Your earnings will automatically add to your balance.", logout: "Logout",
         forgot: "Forgot Password?", recoverTitle: "Recover Password", btnRecover: "RECOVER",
         changePass: "Change Password", btnUpdate: "UPDATE PASSWORD", currentPass: "Current Password", newPass: "New Password",
-        cpaTitle: "🔗 CPA Networks Integration Settings", taskInstr: "Task Instructions", btnPay: "Pay & Reset", btnRemove: "Remove"
+        cpaTitle: "🔗 CPA Networks Integration Settings", taskInstr: "Task Instructions"
     },
     si: {
         title: "GALAXY WORKERS", login: "සේවක ඇතුල්වීම", reg: "සේවක ලියාපදිංචිය",
@@ -36,7 +39,7 @@ const translations = {
         subText: "පහත ඇති Tasks සම්පූර්ණ කරන්න. ඔබ උපයන මුදල් ස්වයංක්‍රීයවම ගිණුමට එකතු වේ.", logout: "ඉවත් වන්න (Logout)",
         forgot: "මුරපදය අමතකද? (Forgot Password)", recoverTitle: "මුරපදය නැවත ලබාගැනීම", btnRecover: "මුරපදය පෙන්වන්න",
         changePass: "මුරපදය වෙනස් කරන්න", btnUpdate: "මුරපදය යාවත්කාලීන කරන්න", currentPass: "වත්මන් මුරපදය", newPass: "නව මුරපදය",
-        cpaTitle: "🔗 CPA ජාල සහ සබැඳි සැකසුම්", taskInstr: "වැඩසටහනේ උපදෙස්", btnPay: "ගෙවා ශේෂය බිංදු කරන්න", btnRemove: "ඉවත් කරන්න"
+        cpaTitle: "🔗 CPA ජාල සහ සබැඳි සැකසුම් (Integration)", taskInstr: "වැඩසටහනේ උපදෙස් (Instructions)"
     },
     ta: {
         title: "GALAXY WORKERS", login: "பணியாளர் உள்நுழைவு", reg: "பணியாளர் பதிவு",
@@ -46,7 +49,7 @@ const translations = {
         subText: "கீழே உள்ள பணிகளை முடிக்கவும். உங்கள் வருவாய் தானாகவே உங்கள் கணக்கில் சேர்க்கப்படும்.", logout: "வெளியேறு (Logout)",
         forgot: "கடவுச்சொல் மறந்துவிட்டதா?", recoverTitle: "கடவுச்சொல்லை மீட்டெடுக்கவும்", btnRecover: "மீட்டெடுப்போம்",
         changePass: "கடவுச்சொல்லை மாற்றவும்", btnUpdate: "கடவுச்சொல்லைப் புதுப்பி", currentPass: "தற்போதைய கடவுச்சொல்", newPass: "புதிய கடவுச்சொல்",
-        cpaTitle: "🔗 CPA நெட்வொர்க் இணைப்பு அமைப்புகள்", taskInstr: "பணி வழிமுறைகள்", btnPay: "பணம் செலுத்தி பூஜ்ஜியமாக்கு", btnRemove: "நீக்கு"
+        cpaTitle: "🔗 CPA நெட்வொர்க் இணைப்பு அமைப்புகள்", taskInstr: "பணி வழிமுறைகள்"
     }
 };
 
@@ -55,52 +58,348 @@ const htmlWrapper = (req, title, content) => {
     return `<!DOCTYPE html><html lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title>
     <style>
         body{background:#0b0c10;color:#c5c6c7;font-family:sans-serif;padding:20px;margin:0;} 
-        .container{max-width:850px;margin:30px auto;background:#1f2833;padding:25px;border-radius:10px;border:1px solid #45a29e;box-shadow: 0px 0px 15px rgba(69, 162, 158, 0.2);}
-        button{padding:10px;background:#45a29e;border:none;color:#0b0c10;font-weight:bold;border-radius:5px;cursor:pointer;margin-top:5px;}
-        .user-row{background:#000;padding:15px;margin:10px 0;border-left:5px solid #66fcf1;border-radius:5px;}
-        .btn-pay{background:#66fcf1;} .btn-rem{background:#ff4d4d; color:#fff;}
-    </style></head><body><div class="container">${content}</div></body></html>`;
+        .container{max-width:850px;margin:30px auto;background:#1f2833;padding:25px;border-radius:10px;border:1px solid #45a29e;box-shadow: 0px 0px 15px rgba(69, 162, 158, 0.2);position:relative;}
+        .lang-selector { position: absolute; top: 15px; right: 15px; }
+        .lang-selector select { background: #0b0c10; color: #66fcf1; border: 1px solid #45a29e; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        input, textarea, select.form-input {width:95%;padding:10px;margin:8px 0;border-radius:5px;border:1px solid #45a29e;background:#0b0c10;color:#fff;} 
+        button{width:100%;padding:12px;background:#45a29e;border:none;color:#0b0c10;font-weight:bold;font-size:16px;border-radius:5px;cursor:pointer;margin-top:10px;}
+        button:hover{background:#66fcf1;}
+        .user-row{background:#0b0c10;padding:12px;margin:10px 0;border-radius:5px;border-left:5px solid #45a29e;text-align:left;position:relative;}
+        a{color:#66fcf1;text-decoration:none;} .logout-btn{background:#ff4d4d;color:#fff;width:auto;padding:5px 10px;font-size:12px;float:right;border-radius:3px;margin-left:5px;}
+        .remove-btn{background:#ff4d4d;color:white;border:none;padding:5px 10px;font-size:11px;cursor:pointer;border-radius:3px;float:right;margin-top:-20px;}
+        .cpa-box{background:#111a24; padding:15px; border:1px solid #66fcf1; border-radius:5px; margin-top:15px; text-align:left;}
+    </style></head><body><div class="container">
+    <div class="lang-selector">
+        <select onchange="window.location.href='/change-lang?lang=' + this.value}">
+            <option value="en" ${lang === 'en' ? 'selected' : ''}>English</option>
+            <option value="si" ${lang === 'si' ? 'selected' : ''}>සිංහල</option>
+            <option value="ta" ${lang === 'ta' ? 'selected' : ''}>தமிழ்</option>
+        </select>
+    </div><h2 style="text-align:center;color:#66fcf1;margin-top:15px;">${translations[lang].title}</h2>${content}</div></body></html>`;
 };
 
-// --- නව විශේෂාංග: Pay & Reset සහ Remove Worker ---
-app.post('/admin/pay-user', (req, res) => {
-    if (req.session.user?.username !== 'admin') return res.redirect('/');
-    db.run("UPDATE users SET balance = 0 WHERE username = ?", [req.body.username], () => res.redirect('/dashboard'));
+// LANGUAGE FIX - දැන් session එක නිවැරදිව update වී redirect වේ.
+app.get('/change-lang', (req, res) => {
+    const selectedLang = req.query.lang;
+    if (['en', 'si', 'ta'].includes(selectedLang)) {
+        req.session.lang = selectedLang;
+    }
+    res.redirect(req.get('referer') || '/');
 });
 
-app.post('/admin/remove-user', (req, res) => {
-    if (req.session.user?.username !== 'admin') return res.redirect('/');
-    db.run("DELETE FROM users WHERE username = ? AND username != 'admin'", [req.body.username], () => res.redirect('/dashboard'));
-});
-
-// --- ඉතිරි සියලුම Logic එක එලෙසම තබා ඇත ---
-app.get('/dashboard', (req, res) => {
-    if (!req.session.user) return res.redirect('/');
-    const user = req.session.user.username;
+// LOGIN
+app.get('/', (req, res) => {
+    if (req.session.user) return res.redirect('/dashboard');
     const t = translations[req.session.lang || 'en'];
+    res.send(htmlWrapper(req, 'Login', `
+        <h3>${t.login}</h3>
+        <form action="/login" method="POST">
+            <input type="text" name="username" placeholder="${t.user}" required>
+            <input type="password" name="password" placeholder="${t.pass}" required>
+            <button type="submit">${t.btnLog}</button>
+        </form>
+        <p style="text-align:center; margin-top:15px;">
+            ${t.noAcc} <a href="/register">${t.regHere}</a> <br><br>
+            <a href="/forgot-password" style="color:#ff4d4d; font-size:14px;">${t.forgot}</a>
+        </p>
+    `));
+});
 
-    if (user === 'admin') {
-        db.all("SELECT * FROM users WHERE username != 'admin'", [], (err, users) => {
-            let list = users.map(u => `
-                <div class="user-row">
-                    <strong>${u.username}</strong> | Balance: $${u.balance.toFixed(4)} <br>
-                    <form action="/admin/pay-user" method="POST" style="display:inline;">
-                        <input type="hidden" name="username" value="${u.username}">
-                        <button type="submit" class="btn-pay">${t.btnPay}</button>
-                    </form>
-                    <form action="/admin/remove-user" method="POST" style="display:inline;">
-                        <input type="hidden" name="username" value="${u.username}">
-                        <button type="submit" class="btn-rem" onclick="return confirm('Sure?')">${t.btnRemove}</button>
-                    </form>
+// REGISTER
+app.get('/register', (req, res) => {
+    const t = translations[req.session.lang || 'en'];
+    res.send(htmlWrapper(req, 'Register', `
+        <h3>${t.reg}</h3>
+        <form action="/register" method="POST">
+            <input type="text" name="username" placeholder="${t.user}" required>
+            <input type="email" name="email" placeholder="${t.email}" required>
+            <input type="password" name="password" placeholder="${t.pass}" required>
+            <input type="text" name="address" placeholder="${t.addr}" required>
+            <input type="text" name="contact" placeholder="${t.phone}" required>
+            <button type="submit">${t.btnReg}</button>
+        </form>
+        <p style="text-align:center;"><a href="/">${t.backLog}</a></p>
+    `));
+});
+
+app.post('/register', (req, res) => {
+    const { username, password, email, address, contact } = req.body;
+    db.run("INSERT INTO users (username, password, email, balance, address, contact) VALUES (?, ?, ?, 0.0, ?, ?)", [username, password, email, address, contact], (err) => {
+        if (err) return res.send(htmlWrapper(req, 'Error', `<h3>Username already exists!</h3><a href="/register">Try again</a>`));
+        res.redirect('/');
+    });
+});
+
+// FORGOT PASSWORD
+app.get('/forgot-password', (req, res) => {
+    const t = translations[req.session.lang || 'en'];
+    res.send(htmlWrapper(req, 'Forgot Password', `
+        <h3>${t.recoverTitle}</h3>
+        <form action="/forgot-password" method="POST">
+            <input type="text" name="username" placeholder="${t.user}" required>
+            <input type="email" name="email" placeholder="${t.email}" required>
+            <button type="submit">${t.btnRecover}</button>
+        </form>
+        <p style="text-align:center;"><a href="/">${t.backLog}</a></p>
+    `));
+});
+
+app.post('/forgot-password', (req, res) => {
+    const { username, email } = req.body;
+    db.get("SELECT password FROM users WHERE username = ? AND email = ?", [username, email], (err, row) => {
+        if (row) {
+            res.send(htmlWrapper(req, 'Password Recovered', `
+                <div style="border:1px solid #45a29e; padding:20px; border-radius:5px; text-align:center;">
+                    <h3 style="color:#66fcf1;">Your Password is:</h3>
+                    <h1 style="color:#fff; background:#0b0c10; padding:10px; display:inline-block; border-radius:5px;">${row.password}</h1>
+                    <br><br><a href="/">Click here to Login</a>
                 </div>
-            `).join('');
-            res.send(htmlWrapper(req, 'Admin', `<h2>🛠️ OWNER PANEL</h2>${list}`));
+            `));
+        } else {
+            res.send(htmlWrapper(req, 'Error', `<h3>Details do not match!</h3><a href="/forgot-password">Try again</a>`));
+        }
+    });
+});
+
+app.post('/login', (req, res) => {
+    const { username, password } = req.body;
+    db.get("SELECT * FROM users WHERE username = ? AND password = ?", [username, password], (err, row) => {
+        if (row) { 
+            req.session.user = row; 
+            res.redirect('/dashboard'); 
+        } else {
+            res.send(htmlWrapper(req, 'Error', `<div style="border:1px solid #ff4d4d; padding:20px; border-radius:5px;"><h3>Invalid Username or Password!</h3><a href="/">Try again</a></div>`));
+        }
+    });
+});
+
+app.get('/logout', (req, res) => {
+    req.session.destroy();
+    res.redirect('/');
+});
+
+// PASSWORD CHANGE FEATURE (SAFETY UPDATE)
+app.post('/change-password', (req, res) => {
+    if (!req.session.user) return res.redirect('/');
+    const { current_password, new_password } = req.body;
+    const username = req.session.user.username;
+
+    db.get("SELECT password FROM users WHERE username = ?", [username], (err, row) => {
+        if (row && row.password === current_password) {
+            db.run("UPDATE users SET password = ? WHERE username = ?", [new_password, username], (err) => {
+                res.send(htmlWrapper(req, 'Success', `<h3>Password Updated Successfully!</h3><a href="/dashboard">Back to Dashboard</a>`));
+            });
+        } else {
+            res.send(htmlWrapper(req, 'Error', `<h3>Current password is incorrect!</h3><a href="/dashboard">Try again</a>`));
+        }
+    });
+});
+
+// REMOVE USER FEATURE (ADMIN ONLY)
+app.post('/admin/remove-user', (req, res) => {
+    if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
+    const { username_to_remove } = req.body;
+
+    if (username_to_remove !== 'admin') {
+        db.run("DELETE FROM users WHERE username = ?", [username_to_remove], (err) => {
+            res.redirect('/dashboard');
         });
     } else {
-        db.get("SELECT balance FROM users WHERE username = ?", [user], (err, row) => {
-            res.send(htmlWrapper(req, 'Dashboard', `<h2>Welcome ${user}</h2><p>Balance: $${row.balance.toFixed(4)}</p>`));
-        });
+        res.send('Cannot remove admin!');
     }
 });
 
-app.listen(3000, () => console.log('Server running...'));
+// CPA INTEGRATION SAVE (ADMIN ONLY)
+app.post('/admin/save-cpa', (req, res) => {
+    if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
+    const { network_name, embed_code, instructions_en, instructions_si, instructions_ta } = req.body;
+
+    db.run("INSERT INTO cpa_configs (network_name, embed_code, instructions_en, instructions_si, instructions_ta) VALUES (?, ?, ?, ?, ?)", 
+    [network_name, embed_code, instructions_en, instructions_si, instructions_ta], (err) => {
+        res.redirect('/dashboard');
+    });
+});
+
+// 📊 DASHBOARD
+app.get('/dashboard', (req, res) => {
+    if (!req.session.user) return res.redirect('/');
+    const user = req.session.user.username;
+    const currentLang = req.session.lang || 'en';
+    const t = translations[currentLang];
+
+    // Password Change Form HTML Snippet
+    const changePasswordForm = `
+        <div style="background:#0b0c10; padding:15px; border-radius:5px; margin-top:20px; border:1px solid #45a29e; text-align:left;">
+            <h4 style="color:#66fcf1; margin:0 0 10px 0;">🔒 ${t.changePass}</h4>
+            <form action="/change-password" method="POST">
+                <input type="password" name="current_password" placeholder="${t.currentPass}" required style="width:90%;">
+                <input type="password" name="new_password" placeholder="${t.newPass}" required style="width:90%;">
+                <button type="submit" style="padding:8px; font-size:14px; width:auto;">${t.btnUpdate}</button>
+            </form>
+        </div>
+    `;
+
+    // Active CPA Offers සහ Tasks Load කිරීම (Dynamic)
+    db.all("SELECT * FROM cpa_configs WHERE is_active = 1", [], (err, configs) => {
+        let dynamicCpaContent = '';
+        if (configs && configs.length > 0) {
+            dynamicCpaContent = configs.map(cfg => {
+                // පරිශීලකයා තෝරාගත් භාෂාව අනුව Instructions Auto Select වීම
+                let instructions = cfg.instructions_en;
+                if (currentLang === 'si') instructions = cfg.instructions_si || cfg.instructions_en;
+                if (currentLang === 'ta') instructions = cfg.instructions_ta || cfg.instructions_en;
+
+                // User ID එක Dynamic ලෙස subid එකට ආදේශ කිරීම (Manual Code Editing අවුල මඟහරවා ගැනීමට)
+                let finalEmbed = cfg.embed_code.replace(/your-widget-id/g, user).replace(/SUBID_HERE/g, user).replace(/subid=/g, `subid=${user}`);
+
+                return `
+                    <div class="cpa-box">
+                        <h4 style="color:#66fcf1; margin-top:0;">📋 ${cfg.network_name} - ${t.taskInstr}</h4>
+                        <p style="color:#fff; font-size:14px; background:#0b0c10; padding:10px; border-radius:4px; border-left:3px solid #66fcf1;">${instructions}</p>
+                        <div style="margin-top:10px; border-radius:8px; overflow:hidden; background:#fff;">
+                            ${finalEmbed}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            // පරණ Default Timewall Iframe එක (CPA links නොමැති විට Backup එකක් ලෙස)
+            const timewallWidgetBaseURL = "https://timewall.io/embed/your-widget-id"; 
+            const finalIframeSrc = `${timewallWidgetBaseURL}?subid=${user}`;
+            dynamicCpaContent = `
+                <iframe src="${finalIframeSrc}" width="100%" height="600px" frameborder="0" style="border-radius:8px; background:#fff; margin-top:15px;"></iframe>
+            `;
+        }
+
+        const timewallIframe = `
+            <h3 style="color:#66fcf1; margin-top:30px; text-align:left;">${t.tasks}</h3>
+            <p style="font-size:13px; color:#aaa; text-align:left;">${t.subText}</p>
+            ${dynamicCpaContent}
+        `;
+
+        if (user === 'admin') {
+            db.all("SELECT * FROM users WHERE username != 'admin'", [], (err, users) => {
+                let list = users.map(u => `
+                    <div class="user-row">
+                        <strong>Worker:</strong> ${u.username} | <strong>Email:</strong> ${u.email} <br>
+                        <strong>Balance:</strong> $${u.balance.toFixed(4)} | <strong>Password:</strong> <span style="color:#66fcf1;">${u.password}</span> <br>
+                        <strong>Address:</strong> ${u.address} | <strong>Contact:</strong> ${u.contact}
+                        <form action="/admin/remove-user" method="POST" onsubmit="return confirm('Are you sure you want to remove this user?');">
+                            <input type="hidden" name="username_to_remove" value="${u.username}">
+                            <button type="submit" class="remove-btn">❌ Remove Worker</button>
+                        </form>
+                    </div>
+                `).join('');
+                
+                // Admin Panel CPA Integration Dashboard Section
+                const adminCpaManager = `
+                    <div style="background:#111a24; padding:20px; border:1px dashed #66fcf1; border-radius:8px; margin-top:30px; text-align:left;">
+                        <h3 style="color:#66fcf1; margin-top:0;">${t.cpaTitle}</h3>
+                        <p style="font-size:12px; color:#aaa;">Add iframe embed codes or tracking links from CPAGrip, CPALead, MaxBounty. Use <strong>SUBID_HERE</strong> where you need to pass the username dynamically.</p>
+                        <form action="/admin/save-cpa" method="POST">
+                            <input type="text" name="network_name" placeholder="Network Name (e.g., CPAGrip, CPALead)" required>
+                            <textarea name="embed_code" placeholder="Paste HTML Embed Code / Iframe Code Here..." rows="4" style="width:95%; background:#0b0c10; color:#fff; border:1px solid #45a29e; padding:10px; border-radius:5px;" required></textarea>
+                            
+                            <h5 style="color:#45a29e; margin:10px 0 5px 0;">Task Instructions in Multi-languages:</h5>
+                            <input type="text" name="instructions_en" placeholder="Instructions in English" required>
+                            <input type="text" name="instructions_si" placeholder="උපදෙස් සිංහලෙන් (Instructions in Sinhala)" required>
+                            <input type="text" name="instructions_ta" placeholder="வழிமுறைகள் தமிழில் (Instructions in Tamil)" required>
+                            
+                            <button type="submit" style="background:#66fcf1; color:#0b0c10;">➕ Add & Integrate Network</button>
+                        </form>
+                    </div>
+                `;
+
+                res.send(htmlWrapper(req, 'Owner Control Panel', `
+                    <a href="/logout" class="logout-btn">${t.logout}</a>
+                    <h2 style="color:#ff4d4d;text-align:left;">🛠️ OWNER CONTROL PANEL</h2>
+                    <p>Welcome back, Boss! Registered workers tracking panel:</p>
+                    <hr style="border-color:#45a29e;">
+                    ${list || '<p style="text-align:center;color:#888;">No workers registered yet.</p>'}
+                    <hr style="border-color:#45a29e;">
+                    <h3 style="margin-top:20px; text-align:left;"><a href="/admin/logs">📊 View Detailed Task Logs</a></h3>
+                    ${adminCpaManager}
+                    <hr style="border-color:#45a29e; margin-top:20px;">
+                    ${changePasswordForm}
+                    <hr style="border-color:#45a29e; margin-top:20px;">
+                    ${timewallIframe}
+                `));
+            });
+        } else {
+            db.get("SELECT balance FROM users WHERE username = ?", [user], (err, row) => {
+                const currentBalance = row ? row.balance.toFixed(4) : '0.0000';
+                res.send(htmlWrapper(req, 'Dashboard', `
+                    <a href="/logout" class="logout-btn">${t.logout}</a>
+                    <h2>${t.welcome}, ${user}! ✨</h2>
+                    <div style="background:#0b0c10; padding:15px; border-radius:5px; margin-bottom:20px; border:1px solid #45a29e;">
+                        <span style="font-size:18px;">${t.total}:</span> 
+                        <span style="font-size:24px; color:#66fcf1; font-weight:bold; float:right;">$${currentBalance}</span>
+                    </div>
+                    ${timewallIframe}
+                    ${changePasswordForm}
+                `));
+            });
+        }
+    });
+});
+
+// 🔎 DETAILED LOGS WITH LIVE FILTER SEARCH
+app.get('/admin/logs', (req, res) => {
+    if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
+    
+    db.all("SELECT * FROM task_logs ORDER BY timestamp DESC", [], (err, logs) => {
+        let logList = logs.map(l => `
+            <div class="user-row log-item" data-username="${l.username.toLowerCase()}" data-task="${l.task_name.toLowerCase()}" style="border-left-color: #66fcf1;">
+                <strong>Worker:</strong> <span class="worker-name">${l.username}</span> <br>
+                <strong>Task Details:</strong> ${l.task_name} <br>
+                <strong>Earned (After 30% Profit Cut):</strong> <span style="color:#66fcf1;">$${l.amount.toFixed(4)}</span> <br>
+                <small style="color:#aaa;">Time: ${l.timestamp}</small>
+            </div>
+        `).join('');
+
+        const searchScript = `
+            <input type="text" id="logSearch" placeholder="🔍 Type Worker Username or Task name to filter..." style="width:95%; padding:12px; margin:15px 0; border:1px solid #66fcf1; border-radius:5px; background:#0b0c10; color:#fff;">
+            
+            <script>
+                document.getElementById('logSearch').addEventListener('input', function() {
+                    let filter = this.value.toLowerCase();
+                    let items = document.querySelectorAll('.log-item');
+                    
+                    items.forEach(function(item) {
+                        let username = item.getAttribute('data-username');
+                        let taskName = item.getAttribute('data-task');
+                        
+                        if (username.includes(filter) || taskName.includes(filter)) {
+                            item.style.display = 'block';
+                        } else {
+                            item.style.display = 'none';
+                        }
+                    });
+                });
+            </script>
+        `;
+
+        res.send(htmlWrapper(req, 'Task Logs', `
+            <a href="/dashboard" style="font-size:14px;"><- Back to Control Panel</a>
+            <h2 style="color:#66fcf1; margin-top:15px;">Completed Task Logs</h2>
+            ${searchScript}
+            <div id="logsContainer" style="margin-top:10px;">
+                ${logList || '<p style="text-align:center;color:#888;">No tasks completed yet.</p>'}
+            </div>
+        `));
+    });
+});
+
+app.get('/postback', (req, res) => {
+    const { subid, reward, task_name } = req.query;
+    if (subid && reward) {
+        const workerReward = parseFloat(reward) * 0.70; 
+        db.run("UPDATE users SET balance = balance + ? WHERE username = ?", [workerReward, subid]);
+        db.run("INSERT INTO task_logs (username, task_name, amount) VALUES (?, ?, ?)", [subid, task_name || 'Micro Task', workerReward]);
+        res.send('OK');
+    } else {
+        res.status(400).send('Invalid Parameters');
+    }
+});
+
+module.exports = app;
