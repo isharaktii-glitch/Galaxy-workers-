@@ -9,33 +9,39 @@ const db = new sqlite3.Database('/tmp/galaxy.db');
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
 
+// 🛠️ DATABASE SETUP: Email එක එකතු කර Table එක Update කර ඇත
 db.serialize(() => {
-    db.run("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, balance REAL DEFAULT 0.0, address TEXT, contact TEXT)");
+    db.run("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, email TEXT, balance REAL DEFAULT 0.0, address TEXT, contact TEXT)");
     db.run("CREATE TABLE IF NOT EXISTS task_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, task_name TEXT, amount REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)");
-    db.run("INSERT OR IGNORE INTO users (username, password, balance, address, contact) VALUES ('admin', 'admin123', 0.0, 'Headquarters', '0000000000')");
+    
+    // Admin එකවුන්ට් එක ඔටෝ සෙට් කිරීම (Password: admin123)
+    db.run("INSERT OR IGNORE INTO users (username, password, email, balance, address, contact) VALUES ('admin', 'admin123', 'admin@galaxy.com', 0.0, 'Headquarters', '0000000000')");
 });
 
 const translations = {
     en: {
         title: "GALAXY WORKERS", login: "Worker Login", reg: "Worker Registration",
-        user: "Username", pass: "Password", addr: "Full Address", phone: "Contact Number",
+        user: "Username", pass: "Password", email: "Email Address", addr: "Full Address", phone: "Contact Number",
         btnLog: "LOG IN", btnReg: "REGISTER", noAcc: "Don't have an account?", regHere: "Register here",
         backLog: "Back to Login", welcome: "Welcome", total: "Your Total Earnings", tasks: "Available Micro Tasks 👇",
-        subText: "Complete the tasks below. Your earnings will automatically add to your balance.", logout: "Logout"
+        subText: "Complete the tasks below. Your earnings will automatically add to your balance.", logout: "Logout",
+        forgot: "Forgot Password?", recoverTitle: "Recover Password", btnRecover: "RECOVER"
     },
     si: {
         title: "GALAXY WORKERS", login: "සේවක ඇතුල්වීම", reg: "සේවක ලියාපදිංචිය",
-        user: "පරිශීලක නාමය (Username)", pass: "මුරපදය (Password)", addr: "සම්පූර්ණ ලිපිනය", phone: "WhatsApp / DUrakathana Ankaya",
+        user: "පරිශීලක නාමය (Username)", pass: "මුරපදය (Password)", email: "ඊමේල් ලිපිනය (Email)", addr: "සම්පූර්ණ ලිපිනය", phone: "WhatsApp / දුරකථන අංකය",
         btnLog: "ඇතුල් වන්න", btnReg: "ලියාපදිංචි වන්න", noAcc: "ගිණුමක් නොමැතිද?", regHere: "මෙහි ලියාපදිංචි වන්න",
         backLog: "නැවත මුල් පිටුවට", welcome: "ආයුබෝවන්", total: "ඔබේ මුළු උපයනය", tasks: "කිරීමට ඇති සරල වැඩ (Tasks) 👇",
-        subText: "පහත ඇති Tasks සම්පූර්ණ කරන්න. ඔබ උපයන මුදල් ස්වයංක්‍රීයවම ගිණුමට එකතු වේ.", logout: "ඉවත් වන්න (Logout)"
+        subText: "පහත ඇති Tasks සම්පූර්ණ කරන්න. ඔබ උපයන මුදල් ස්වයංක්‍රීයවම ගිණුමට එකතු වේ.", logout: "ඉවත් වන්න (Logout)",
+        forgot: "මුරපදය අමතකද? (Forgot Password)", recoverTitle: "මුරපදය නැවත ලබාගැනීම", btnRecover: "මුරපදය පෙන්වන්න"
     },
     ta: {
         title: "GALAXY WORKERS", login: "பணியாளர் உள்நுழைவு", reg: "பணியாளர் பதிவு",
-        user: "பயனர் பெயர் (Username)", pass: "கடவுச்சொல் (Password)", addr: "முழு முகவரி", phone: "தொலைபேசி எண்",
+        user: "பயனர் பெயர் (Username)", pass: "கடவுச்சொல் (Password)", email: "மின்னஞ்சல் முகவரி", addr: "முழு முகவரி", phone: "தொலைபேசி எண்",
         btnLog: "உள்நுழைக", btnReg: "பதிவு செய்க", noAcc: "கணக்கு இல்லையா?", regHere: "இங்கே பதிவு செய்யவும்",
         backLog: "மீண்டும் உள்நுழைய", welcome: "வரவேற்கிறோம்", total: "உங்கள் மொத்த வருவாய்", tasks: "கிடைக்கக்கூடிய பணிகள் 👇",
-        subText: "கீழே உள்ள பணிகளை முடிக்கவும். உங்கள் வருவாய் தானாகவே உங்கள் கணக்கில் சேர்க்கப்படும்.", logout: "வெளியேறு (Logout)"
+        subText: "கீழே உள்ள பணிகளை முடிக்கவும். உங்கள் வருவாய் தானாகவே உங்கள் கணக்கில் சேர்க்கப்படும்.", logout: "வெளியேறு (Logout)",
+        forgot: "கடவுச்சொல் மறந்துவிட்டதா?", recoverTitle: "கடவுச்சொல்லை மீட்டெடுக்கவும்", btnRecover: "மீட்டெடுப்போம்"
     }
 };
 
@@ -68,6 +74,7 @@ app.get('/change-lang', (req, res) => {
     res.redirect('back');
 });
 
+// LOGIN PAGE
 app.get('/', (req, res) => {
     if (req.session.user) return res.redirect('/dashboard');
     const t = translations[req.session.lang || 'en'];
@@ -78,16 +85,21 @@ app.get('/', (req, res) => {
             <input type="password" name="password" placeholder="${t.pass}" required>
             <button type="submit">${t.btnLog}</button>
         </form>
-        <p style="text-align:center;">${t.noAcc} <a href="/register">${t.regHere}</a></p>
+        <p style="text-align:center; margin-top:15px;">
+            ${t.noAcc} <a href="/register">${t.regHere}</a> <br><br>
+            <a href="/forgot-password" style="color:#ff4d4d; font-size:14px;">${t.forgot}</a>
+        </p>
     `));
 });
 
+// REGISTER PAGE (Email ඇතුළත් කර ඇත)
 app.get('/register', (req, res) => {
     const t = translations[req.session.lang || 'en'];
     res.send(htmlWrapper(req, 'Register', `
         <h3>${t.reg}</h3>
         <form action="/register" method="POST">
             <input type="text" name="username" placeholder="${t.user}" required>
+            <input type="email" name="email" placeholder="${t.email}" required>
             <input type="password" name="password" placeholder="${t.pass}" required>
             <input type="text" name="address" placeholder="${t.addr}" required>
             <input type="text" name="contact" placeholder="${t.phone}" required>
@@ -98,10 +110,41 @@ app.get('/register', (req, res) => {
 });
 
 app.post('/register', (req, res) => {
-    const { username, password, address, contact } = req.body;
-    db.run("INSERT INTO users (username, password, address, contact) VALUES (?, ?, ?, ?)", [username, password, address, contact], (err) => {
+    const { username, password, email, address, contact } = req.body;
+    db.run("INSERT INTO users (username, password, email, balance, address, contact) VALUES (?, ?, ?, 0.0, ?, ?)", [username, password, email, address, contact], (err) => {
         if (err) return res.send(htmlWrapper(req, 'Error', `<h3>Username already exists!</h3><a href="/register">Try again</a>`));
         res.redirect('/');
+    });
+});
+
+// FORGOT PASSWORD SYSTEM
+app.get('/forgot-password', (req, res) => {
+    const t = translations[req.session.lang || 'en'];
+    res.send(htmlWrapper(req, 'Forgot Password', `
+        <h3>${t.recoverTitle}</h3>
+        <form action="/forgot-password" method="POST">
+            <input type="text" name="username" placeholder="${t.user}" required>
+            <input type="email" name="email" placeholder="${t.email}" required>
+            <button type="submit">${t.btnRecover}</button>
+        </form>
+        <p style="text-align:center;"><a href="/">${t.backLog}</a></p>
+    `));
+});
+
+app.post('/forgot-password', (req, res) => {
+    const { username, email } = req.body;
+    db.get("SELECT password FROM users WHERE username = ? AND email = ?", [username, email], (err, row) => {
+        if (row) {
+            res.send(htmlWrapper(req, 'Password Recovered', `
+                <div style="border:1px solid #45a29e; padding:20px; border-radius:5px; text-align:center;">
+                    <h3 style="color:#66fcf1;">Your Password is:</h3>
+                    <h1 style="color:#fff; background:#0b0c10; padding:10px; display:inline-block; border-radius:5px;">${row.password}</h1>
+                    <br><br><a href="/">Click here to Login</a>
+                </div>
+            `));
+        } else {
+            res.send(htmlWrapper(req, 'Error', `<h3>Details do not match!</h3><a href="/forgot-password">Try again</a>`));
+        }
     });
 });
 
@@ -128,10 +171,11 @@ app.get('/dashboard', (req, res) => {
     const user = req.session.user.username;
     const t = translations[req.session.lang || 'en'];
 
-    // 💡 ⚠️ වැදගත්: පහත තියෙන "https://timewall.io/embed/your-widget-id" වෙනුවට ඔයාගේ Timewall Widget Embed ලින්ක් එක දාන්න!
+    // 💡 Timewall URL එක (පස්සේ ඔයාගේ Widget එක දැම්මම වෙනස් කරන්න)
     const timewallWidgetBaseURL = "https://timewall.io/embed/your-widget-id"; 
     const finalIframeSrc = `${timewallWidgetBaseURL}?subid=${user}`;
 
+    // Timewall iframe එක ලස්සනට වෙනම කෑල්ලකට ගත්තා
     const timewallIframe = `
         <h3 style="color:#66fcf1; margin-top:30px; text-align:left;">${t.tasks}</h3>
         <p style="font-size:13px; color:#aaa; text-align:left;">${t.subText}</p>
@@ -142,8 +186,8 @@ app.get('/dashboard', (req, res) => {
         db.all("SELECT * FROM users WHERE username != 'admin'", [], (err, users) => {
             let list = users.map(u => `
                 <div class="user-row">
-                    <strong>Worker:</strong> ${u.username} | <strong>Balance:</strong> $${u.balance.toFixed(4)} <br>
-                    <strong>Password:</strong> <span style="color:#66fcf1;">${u.password}</span> (Recovery) <br>
+                    <strong>Worker:</strong> ${u.username} | <strong>Email:</strong> ${u.email} <br>
+                    <strong>Balance:</strong> $${u.balance.toFixed(4)} | <strong>Password:</strong> <span style="color:#66fcf1;">${u.password}</span> <br>
                     <strong>Address:</strong> ${u.address} | <strong>Contact:</strong> ${u.contact}
                 </div>
             `).join('');
@@ -157,10 +201,12 @@ app.get('/dashboard', (req, res) => {
                 <hr style="border-color:#45a29e;">
                 <h3 style="margin-top:20px; text-align:left;"><a href="/admin/logs">📊 View Detailed Task Logs</a></h3>
                 <hr style="border-color:#45a29e; margin-top:20px;">
+                
                 ${timewallIframe}
             `));
         });
     } else {
+        // 🤫 සාමාන්‍ය Usersලා ලොග් වුණාම iframe එක පේන්නේ නැහැ, Balance එක විතරයි පේන්නේ!
         db.get("SELECT balance FROM users WHERE username = ?", [user], (err, row) => {
             const currentBalance = row ? row.balance.toFixed(4) : '0.0000';
             res.send(htmlWrapper(req, 'Dashboard', `
@@ -170,7 +216,10 @@ app.get('/dashboard', (req, res) => {
                     <span style="font-size:18px;">${t.total}:</span> 
                     <span style="font-size:24px; color:#66fcf1; font-weight:bold; float:right;">$${currentBalance}</span>
                 </div>
-                ${timewallIframe}
+                <div style="text-align:center; padding:40px; border:1px dashed #45a29e; border-radius:10px; margin-top:30px;">
+                    <h3 style="color:#66fcf1;">📢 System Maintenance Update</h3>
+                    <p style="color:#aaa; font-size:14px;">We are currently configuring your task board. New micro tasks will be available shortly! Keep an eye on your WhatsApp group.</p>
+                </div>
             `));
         });
     }
