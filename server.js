@@ -9,16 +9,12 @@ const db = new sqlite3.Database('/tmp/galaxy.db');
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
 
-// 🛠️ DATABASE SETUP: Admin එකවුන්ට් එක හැමවිටම ඔටෝ හැදෙන කෑල්ල ඇතුළත් කර ඇත!
 db.serialize(() => {
     db.run("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, balance REAL DEFAULT 0.0, address TEXT, contact TEXT)");
     db.run("CREATE TABLE IF NOT EXISTS task_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, task_name TEXT, amount REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)");
-    
-    // Admin එක නැත්නම් විතරක් ඔටෝ හදනවා (Password: admin123)
     db.run("INSERT OR IGNORE INTO users (username, password, balance, address, contact) VALUES ('admin', 'admin123', 0.0, 'Headquarters', '0000000000')");
 });
 
-// බහුභාෂා පරිවර්තන (Translations)
 const translations = {
     en: {
         title: "GALAXY WORKERS", login: "Worker Login", reg: "Worker Registration",
@@ -72,7 +68,6 @@ app.get('/change-lang', (req, res) => {
     res.redirect('back');
 });
 
-// 1. LOGIN PAGE
 app.get('/', (req, res) => {
     if (req.session.user) return res.redirect('/dashboard');
     const t = translations[req.session.lang || 'en'];
@@ -87,7 +82,6 @@ app.get('/', (req, res) => {
     `));
 });
 
-// 2. REGISTER PAGE
 app.get('/register', (req, res) => {
     const t = translations[req.session.lang || 'en'];
     res.send(htmlWrapper(req, 'Register', `
@@ -128,11 +122,18 @@ app.get('/logout', (req, res) => {
     res.redirect('/');
 });
 
-// 3. DASHBOARD & ADMIN CONTROL PANEL
+// 📊 DASHBOARD (දැන් Admin ට පැනල් එක සහ සයිට් එකේ Tasks දෙකම එකට පෙනේ)
 app.get('/dashboard', (req, res) => {
     if (!req.session.user) return res.redirect('/');
     const user = req.session.user.username;
     const t = translations[req.session.lang || 'en'];
+
+    // පොදු Timewall IFrame කොටස
+    const timewallIframe = `
+        <h3 style="color:#66fcf1; margin-top:30px; text-align:left;">${t.tasks}</h3>
+        <p style="font-size:13px; color:#aaa; text-align:left;">${t.subText}</p>
+        <iframe src="https://timewall.io/embed/your-widget-id-here" width="100%" height="600px" frameborder="0" style="border-radius:8px; background:#fff; margin-top:15px;"></iframe>
+    `;
 
     if (user === 'admin') {
         db.all("SELECT * FROM users WHERE username != 'admin'", [], (err, users) => {
@@ -151,7 +152,10 @@ app.get('/dashboard', (req, res) => {
                 <hr style="border-color:#45a29e;">
                 ${list || '<p style="text-align:center;color:#888;">No workers registered yet.</p>'}
                 <hr style="border-color:#45a29e;">
-                <h3 style="margin-top:20px;"><a href="/admin/logs">📊 View Detailed Task Logs</a></h3>
+                <h3 style="margin-top:20px; text-align:left;"><a href="/admin/logs">📊 View Detailed Task Logs</a></h3>
+                <hr style="border-color:#45a29e; margin-top:20px;">
+                
+                ${timewallIframe}
             `));
         });
     } else {
@@ -164,19 +168,14 @@ app.get('/dashboard', (req, res) => {
                     <span style="font-size:18px;">${t.total}:</span> 
                     <span style="font-size:24px; color:#66fcf1; font-weight:bold; float:right;">$${currentBalance}</span>
                 </div>
-                <h3 style="color:#66fcf1; margin-bottom:10px; text-align:left;">${t.tasks}</h3>
-                <p style="font-size:13px; color:#aaa; text-align:left;">${t.subText}</p>
-                
-                <iframe src="https://timewall.io/embed/your-widget-id-here" width="100%" height="600px" frameborder="0" style="border-radius:8px; background:#fff; margin-top:15px;"></iframe>
+                ${timewallIframe}
             `));
         });
     }
 });
 
-// 4. ADMIN DETAILED TASK LOGS
 app.get('/admin/logs', (req, res) => {
     if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
-    
     db.all("SELECT * FROM task_logs ORDER BY timestamp DESC", [], (err, logs) => {
         let logList = logs.map(l => `
             <div class="user-row" style="border-left-color: #66fcf1;">
@@ -186,7 +185,6 @@ app.get('/admin/logs', (req, res) => {
                 <small style="color:#aaa;">Time: ${l.timestamp}</small>
             </div>
         `).join('');
-        
         res.send(htmlWrapper(req, 'Task Logs', `
             <a href="/dashboard" style="font-size:14px;"><- Back to Control Panel</a>
             <h2 style="color:#66fcf1; margin-top:15px;">Completed Task Logs</h2>
@@ -195,11 +193,10 @@ app.get('/admin/logs', (req, res) => {
     });
 });
 
-// 5. AUTOMATIC TIMEWALL POSTBACK (30% Profit Deduction)
 app.get('/postback', (req, res) => {
     const { subid, reward, task_name } = req.query;
     if (subid && reward) {
-        const workerReward = parseFloat(reward) * 0.70; // 30% Profit Cut
+        const workerReward = parseFloat(reward) * 0.70; 
         db.run("UPDATE users SET balance = balance + ? WHERE username = ?", [workerReward, subid]);
         db.run("INSERT INTO task_logs (username, task_name, amount) VALUES (?, ?, ?)", [subid, task_name || 'Micro Task', workerReward]);
         res.send('OK');
