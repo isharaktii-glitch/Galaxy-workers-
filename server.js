@@ -5,7 +5,7 @@ const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 
-// 🔑 SUPABASE CONFIGURATION (ඔයාගේ URL එක සහ anon key එක මම මෙතනට දාලා තියෙන්නේ)
+// 🔑 SUPABASE CONFIGURATION 
 const SUPABASE_URL = 'https://tkhxgaemkqrngxrmwmem.supabase.co';
 const SUPABASE_KEY = 'EyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRraHhnYWVta3Fybmd4cm13bWVtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MjEwNTksImV4cCI6MjA5NjM5NzA1OX0.408eL1mPUidytAaTeamTvmFeuyVoSOUEP7mI3GXZ2U0';
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -368,82 +368,4 @@ app.get('/dashboard', async (req, res) => {
             <a href="/change-password" class="logout-btn" style="background:#45a29e;">🔑 Change Password</a>
             <h2>${t.welcome}, ${user}! ✨</h2>
             <div style="background:#0b0c10; padding:15px; border-radius:5px; margin-bottom:20px; border:1px solid #45a29e;">
-                <span style="font-size:18px;">${t.total}:</span> 
-                <span style="font-size:24px; color:#66fcf1; font-weight:bold; float:right;">$${currentBalance}</span>
-            </div>
-
-            ${cpaSection}
-
-            <div style="text-align:center; padding:40px; border:1px dashed #45a29e; border-radius:10px; margin-top:30px;">
-                <h3 style="color:#66fcf1;">📢 System Maintenance Update</h3>
-                <p style="color:#aaa; font-size:14px;">We are currently configuring your task board. New micro tasks will be available shortly! Keep an eye on your WhatsApp group.</p>
-            </div>
-        `));
-    }
-});
-
-// 🔎 DETAILED LOGS WITH LIVE FILTER SEARCH
-app.get('/admin/logs', async (req, res) => {
-    if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
-    
-    const { data: logs } = await supabase.from('task_logs').select('*').order('timestamp', { ascending: false });
-    
-    let logList = (logs || []).map(l => `
-        <div class="user-row log-item" data-username="${l.username.toLowerCase()}" data-task="${l.task_name.toLowerCase()}" style="border-left-color: #66fcf1;">
-            <strong>Worker:</strong> <span class="worker-name">${l.username}</span> <br>
-            <strong>Task Details:</strong> ${l.task_name} <br>
-            <strong>Earned (After 30% Profit Cut):</strong> <span style="color:#66fcf1;">$${parseFloat(l.amount).toFixed(4)}</span> <br>
-            <small style="color:#aaa;">Time: ${l.timestamp}</small>
-        </div>
-    `).join('');
-
-    const searchScript = `
-        <input type="text" id="logSearch" placeholder="🔍 Type Worker Username or Task name to filter..." style="width:95%; padding:12px; margin:15px 0; border:1px solid #66fcf1; border-radius:5px; background:#0b0c10; color:#fff;">
-        
-        <script>
-            document.getElementById('logSearch').addEventListener('input', function() {
-                let filter = this.value.toLowerCase();
-                let items = document.querySelectorAll('.log-item');
-                
-                items.forEach(function(item) {
-                    let username = item.getAttribute('data-username');
-                    let taskName = item.getAttribute('data-task');
-                    
-                    if (username.includes(filter) || taskName.includes(filter)) {
-                        item.style.display = 'block';
-                    } else {
-                        item.style.display = 'none';
-                    }
-                });
-            });
-        </script>
-    `;
-
-    res.send(htmlWrapper(req, 'Task Logs', `
-        <a href="/dashboard" style="font-size:14px;"><- Back to Control Panel</a>
-        <h2 style="color:#66fcf1; margin-top:15px;">Completed Task Logs</h2>
-        ${searchScript}
-        <div id="logsContainer" style="margin-top:10px;">
-            ${logList || '<p style="text-align:center;color:#888;">No tasks completed yet.</p>'}
-        </div>
-    `));
-});
-
-app.get('/postback', async (req, res) => {
-    const { subid, reward, task_name } = req.query;
-    if (subid && reward) {
-        const workerReward = parseFloat(reward) * 0.70; 
-        
-        const { data: user } = await supabase.from('users').select('balance').eq('username', subid).single();
-        if (user) {
-            const newBalance = parseFloat(user.balance) + workerReward;
-            await supabase.from('users').update({ balance: newBalance }).eq('username', subid);
-            await supabase.from('task_logs').insert([{ username: subid, task_name: task_name || 'Micro Task', amount: workerReward }]);
-        }
-        res.send('OK');
-    } else {
-        res.status(400).send('Invalid Parameters');
-    }
-});
-
-module.exports = app;
+                <span style="font-
