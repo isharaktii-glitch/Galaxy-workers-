@@ -1,22 +1,17 @@
 const express = require('express');
 const session = require('express-session');
 const bodyParser = require('body-parser');
-const sqlite3 = require('sqlite3').verbose();
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
-const db = new sqlite3.Database('/tmp/galaxy.db'); 
+
+// 🔑 SUPABASE CONFIGURATION (ඔයාගේ URL එක සහ anon key එක මම මෙතනට දාලා තියෙන්නේ)
+const SUPABASE_URL = 'https://tkhxgaemkqrngxrmwmem.supabase.co';
+const SUPABASE_KEY = 'EyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRraHhnYWVta3Fybmd4cm13bWVtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MjEwNTksImV4cCI6MjA5NjM5NzA1OX0.408eL1mPUidytAaTeamTvmFeuyVoSOUEP7mI3GXZ2U0';
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
-
-// 🗄️ DATABASE SETUP
-db.serialize(() => {
-    db.run("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, email TEXT, balance REAL DEFAULT 0.0, address TEXT, contact TEXT)");
-    db.run("CREATE TABLE IF NOT EXISTS task_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, task_name TEXT, amount REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)");
-    db.run("CREATE TABLE IF NOT EXISTS cpa_offers (id INTEGER PRIMARY KEY AUTOINCREMENT, network_name TEXT, offer_title TEXT, offer_link TEXT, payout REAL, instruction_en TEXT, status TEXT DEFAULT 'active')");
-    
-    db.run("INSERT OR IGNORE INTO users (username, password, email, balance, address, contact) VALUES ('admin', 'admin123', 'admin@galaxy.com', 0.0, 'Headquarters', '0000000000')");
-});
 
 const translations = {
     en: {
@@ -118,12 +113,11 @@ app.get('/register', (req, res) => {
     `));
 });
 
-app.post('/register', (req, res) => {
+app.post('/register', async (req, res) => {
     const { username, password, email, address, contact } = req.body;
-    db.run("INSERT INTO users (username, password, email, balance, address, contact) VALUES (?, ?, ?, 0.0, ?, ?)", [username, password, email, address, contact], (err) => {
-        if (err) return res.send(htmlWrapper(req, 'Error', `<h3>Username already exists!</h3><a href="/register">Try again</a>`));
-        res.redirect('/');
-    });
+    const { error } = await supabase.from('users').insert([{ username, password, email, balance: 0.0, address, contact }]);
+    if (error) return res.send(htmlWrapper(req, 'Error', `<h3>Username already exists!</h3><a href="/register">Try again</a>`));
+    res.redirect('/');
 });
 
 // FORGOT PASSWORD
@@ -140,33 +134,31 @@ app.get('/forgot-password', (req, res) => {
     `));
 });
 
-app.post('/forgot-password', (req, res) => {
+app.post('/forgot-password', async (req, res) => {
     const { username, email } = req.body;
-    db.get("SELECT password FROM users WHERE username = ? AND email = ?", [username, email], (err, row) => {
-        if (row) {
-            res.send(htmlWrapper(req, 'Password Recovered', `
-                <div style="border:1px solid #45a29e; padding:20px; border-radius:5px; text-align:center;">
-                    <h3 style="color:#66fcf1;">Your Password is:</h3>
-                    <h1 style="color:#fff; background:#0b0c10; padding:10px; display:inline-block; border-radius:5px;">${row.password}</h1>
-                    <br><br><a href="/">Click here to Login</a>
-                </div>
-            `));
-        } else {
-            res.send(htmlWrapper(req, 'Error', `<h3>Details do not match!</h3><a href="/forgot-password">Try again</a>`));
-        }
-    });
+    const { data } = await supabase.from('users').select('password').eq('username', username).eq('email', email).single();
+    if (data) {
+        res.send(htmlWrapper(req, 'Password Recovered', `
+            <div style="border:1px solid #45a29e; padding:20px; border-radius:5px; text-align:center;">
+                <h3 style="color:#66fcf1;">Your Password is:</h3>
+                <h1 style="color:#fff; background:#0b0c10; padding:10px; display:inline-block; border-radius:5px;">${data.password}</h1>
+                <br><br><a href="/">Click here to Login</a>
+            </div>
+        `));
+    } else {
+        res.send(htmlWrapper(req, 'Error', `<h3>Details do not match!</h3><a href="/forgot-password">Try again</a>`));
+    }
 });
 
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
     const { username, password } = req.body;
-    db.get("SELECT * FROM users WHERE username = ? AND password = ?", [username, password], (err, row) => {
-        if (row) { 
-            req.session.user = row; 
-            res.redirect('/dashboard'); 
-        } else {
-            res.send(htmlWrapper(req, 'Error', `<div style="border:1px solid #ff4d4d; padding:20px; border-radius:5px;"><h3>Invalid Username or Password!</h3><a href="/">Try again</a></div>`));
-        }
-    });
+    const { data } = await supabase.from('users').select('*').eq('username', username).eq('password', password).single();
+    if (data) { 
+        req.session.user = data; 
+        res.redirect('/dashboard'); 
+    } else {
+        res.send(htmlWrapper(req, 'Error', `<div style="border:1px solid #ff4d4d; padding:20px; border-radius:5px;"><h3>Invalid Username or Password!</h3><a href="/">Try again</a></div>`));
+    }
 });
 
 app.get('/logout', (req, res) => {
@@ -189,51 +181,47 @@ app.get('/change-password', (req, res) => {
     `));
 });
 
-app.post('/change-password', (req, res) => {
+app.post('/change-password', async (req, res) => {
     if (!req.session.user) return res.redirect('/');
     const { oldPassword, newPassword } = req.body;
     const username = req.session.user.username;
 
-    db.get("SELECT password FROM users WHERE username = ?", [username], (err, row) => {
-        if (row && row.password === oldPassword) {
-            db.run("UPDATE users SET password = ? WHERE username = ?", [newPassword, username], (err) => {
-                res.send(htmlWrapper(req, 'Success', `<h3>Password updated successfully!</h3><a href="/dashboard">Back to Dashboard</a>`));
-            });
-        } else {
-            res.send(htmlWrapper(req, 'Error', `<h3>Old password is incorrect!</h3><a href="/change-password">Try again</a>`));
-        }
-    });
+    const { data } = await supabase.from('users').select('password').eq('username', username).single();
+    if (data && data.password === oldPassword) {
+        await supabase.from('users').update({ password: newPassword }).eq('username', username);
+        res.send(htmlWrapper(req, 'Success', `<h3>Password updated successfully!</h3><a href="/dashboard">Back to Dashboard</a>`));
+    } else {
+        res.send(htmlWrapper(req, 'Error', `<h3>Old password is incorrect!</h3><a href="/change-password">Try again</a>`));
+    }
 });
 
 // ❌ ADMIN: DELETE WORKER USER
-app.get('/admin/delete-user/:id', (req, res) => {
+app.get('/admin/delete-user/:id', async (req, res) => {
     if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
-    db.run("DELETE FROM users WHERE id = ? AND username != 'admin'", [req.params.id], (err) => {
-        res.redirect('/dashboard');
-    });
+    await supabase.from('users').delete().eq('id', req.params.id).neq('username', 'admin');
+    res.redirect('/dashboard');
 });
 
 // 📥 ADMIN: ADD CPA LINKS
-app.post('/admin/add-cpa', (req, res) => {
+app.post('/admin/add-cpa', async (req, res) => {
     if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
     const { network_name, offer_title, offer_link, payout, instruction_en } = req.body;
     
-    db.run("INSERT INTO cpa_offers (network_name, offer_title, offer_link, payout, instruction_en) VALUES (?, ?, ?, ?, ?)", 
-    [network_name, offer_title, offer_link, parseFloat(payout), instruction_en], (err) => {
-        res.redirect('/dashboard');
-    });
+    await supabase.from('cpa_offers').insert([
+        { network_name, offer_title, offer_link, payout: parseFloat(payout), instruction_en, status: 'active' }
+    ]);
+    res.redirect('/dashboard');
 });
 
 // ❌ ADMIN: DELETE CPA LINK
-app.get('/admin/delete-cpa/:id', (req, res) => {
+app.get('/admin/delete-cpa/:id', async (req, res) => {
     if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
-    db.run("DELETE FROM cpa_offers WHERE id = ?", [req.params.id], (err) => {
-        res.redirect('/dashboard');
-    });
+    await supabase.from('cpa_offers').delete().eq('id', req.params.id);
+    res.redirect('/dashboard');
 });
 
-// 📊 DASHBOARD (FIXED: PROMISE.ALL TO DISPLAY OLD USERS CORRECTLY)
-app.get('/dashboard', (req, res) => {
+// 📊 DASHBOARD
+app.get('/dashboard', async (req, res) => {
     if (!req.session.user) return res.redirect('/');
     const user = req.session.user.username;
     const currentLang = req.session.lang || 'en';
@@ -249,197 +237,209 @@ app.get('/dashboard', (req, res) => {
     `;
 
     if (user === 'admin') {
-        const getUsers = new Promise((resolve, reject) => {
-            db.all("SELECT * FROM users WHERE username != 'admin'", [], (err, rows) => err ? reject(err) : resolve(rows));
-        });
-        const getOffers = new Promise((resolve, reject) => {
-            db.all("SELECT * FROM cpa_offers", [], (err, rows) => err ? reject(err) : resolve(rows));
-        });
+        const { data: users } = await supabase.from('users').select('*').neq('username', 'admin');
+        const { data: offers } = await supabase.from('cpa_offers').select('*');
 
-        Promise.all([getUsers, getOffers]).then(([users, offers]) => {
-            let workerList = users.map(u => `
-                <div class="user-row">
-                    <a href="/admin/delete-user/${u.id}" class="delete-btn" onclick="return confirm('Are you sure you want to remove this worker?')">Remove Worker</a>
-                    <strong>Worker:</strong> ${u.username} | <strong>Email:</strong> ${u.email} <br>
-                    <strong>Balance:</strong> $${u.balance.toFixed(4)} | <strong>Password:</strong> <span style="color:#66fcf1;">${u.password}</span> <br>
-                    <strong>Address:</strong> ${u.address} | <strong>Contact:</strong> ${u.contact}
-                </div>
-            `).join('');
+        let workerList = (users || []).map(u => `
+            <div class="user-row">
+                <a href="/admin/delete-user/${u.id}" class="delete-btn" onclick="return confirm('Are you sure you want to remove this worker?')">Remove Worker</a>
+                <strong>Worker:</strong> ${u.username} | <strong>Email:</strong> ${u.email} <br>
+                <strong>Balance:</strong> $${parseFloat(u.balance).toFixed(4)} | <strong>Password:</strong> <span style="color:#66fcf1;">${u.password}</span> <br>
+                <strong>Address:</strong> ${u.address} | <strong>Contact:</strong> ${u.contact}
+            </div>
+        `).join('');
 
-            let activeOffersList = offers.map(o => `
-                <div class="user-row" style="border-left-color: #ff4d4d;">
-                    <a href="/admin/delete-cpa/${o.id}" class="delete-btn">Delete Offer</a>
-                    <strong>[${o.network_name}]</strong> ${o.offer_title} - <span style="color:#66fcf1;">$${o.payout}</span><br>
-                    <small style="word-break: break-all;">Link: ${o.offer_link}</small>
-                </div>
-            `).join('');
+        let activeOffersList = (offers || []).map(o => `
+            <div class="user-row" style="border-left-color: #ff4d4d;">
+                <a href="/admin/delete-cpa/${o.id}" class="delete-btn">Delete Offer</a>
+                <strong>[${o.network_name}]</strong> ${o.offer_title} - <span style="color:#66fcf1;">$${o.payout}</span><br>
+                <small style="word-break: break-all;">Link: ${o.offer_link}</small>
+            </div>
+        `).join('');
 
-            res.send(htmlWrapper(req, 'Owner Control Panel', `
-                <a href="/logout" class="logout-btn">${t.logout}</a>
-                <h2 style="color:#ff4d4d;text-align:left;">🛠️ OWNER CONTROL PANEL</h2>
-                <p>Welcome back, Boss!</p>
-                
-                <hr style="border-color:#45a29e;">
-                <h3>➕ ADD CPA / CPALEAD / MAXBOUNTY LINKS</h3>
-                <form action="/admin/add-cpa" method="POST" style="background:#141d26; padding:15px; border-radius:8px;">
-                    <select name="network_name" required>
-                        <option value="CPAGrip">CPAGrip</option>
-                        <option value="CPALead">CPALead</option>
-                        <option value="MaxBounty">MaxBounty</option>
-                        <option value="Other">Other Network / GitHub Link</option>
-                    </select>
-                    <input type="text" name="offer_title" placeholder="Offer Title (e.g., Complete Survey)" required>
-                    <input type="text" name="offer_link" placeholder="Paste Offer Link / Affiliate URL here" required>
-                    <input type="number" step="0.01" name="payout" placeholder="Worker Payout Amount ($)" required>
-                    <textarea name="instruction_en" placeholder="Type Instructions in English ONLY (System will auto-translate for workers)" rows="3" required></textarea>
-                    <button type="submit" style="background:#66fcf1; color:#0b0c10;">UPLOAD & INTEGRATE TASK</button>
-                </form>
+        res.send(htmlWrapper(req, 'Owner Control Panel', `
+            <a href="/logout" class="logout-btn">${t.logout}</a>
+            <h2 style="color:#ff4d4d;text-align:left;">🛠️ OWNER CONTROL PANEL</h2>
+            <p>Welcome back, Boss!</p>
+            
+            <hr style="border-color:#45a29e;">
+            <h3>➕ ADD CPA / CPALEAD / MAXBOUNTY LINKS</h3>
+            <form action="/admin/add-cpa" method="POST" style="background:#141d26; padding:15px; border-radius:8px;">
+                <select name="network_name" required>
+                    <option value="CPAGrip">CPAGrip</option>
+                    <option value="CPALead">CPALead</option>
+                    <option value="MaxBounty">MaxBounty</option>
+                    <option value="Other">Other Network / GitHub Link</option>
+                </select>
+                <input type="text" name="offer_title" placeholder="Offer Title (e.g., Complete Survey)" required>
+                <input type="text" name="offer_link" placeholder="Paste Offer Link / Affiliate URL here" required>
+                <input type="number" step="0.01" name="payout" placeholder="Worker Payout Amount ($)" required>
+                <textarea name="instruction_en" placeholder="Type Instructions in English ONLY" rows="3" required></textarea>
+                <button type="submit" style="background:#66fcf1; color:#0b0c10;">UPLOAD & INTEGRATE TASK</button>
+            </form>
 
-                <h3 style="margin-top:20px;">🔗 Active Managed CPA Offers</h3>
-                ${activeOffersList || '<p style="color:#888;">No CPA offers active.</p>'}
+            <h3 style="margin-top:20px;">🔗 Active Managed CPA Offers</h3>
+            ${activeOffersList || '<p style="color:#888;">No CPA offers active.</p>'}
 
-                <hr style="border-color:#45a29e; margin-top:20px;">
-                <h3>👥 REGISTERED WORKERS TRACKING</h3>
-                <div id="workersContainer">
-                    ${workerList || '<p style="text-align:center;color:#888;">No workers registered yet.</p>'}
-                </div>
-                
-                <hr style="border-color:#45a29e;">
-                <h3 style="margin-top:20px; text-align:left;"><a href="/admin/logs">📊 View Detailed Task Logs</a></h3>
-                <hr style="border-color:#45a29e; margin-top:20px;">
-                ${timewallIframe}
-            `));
-        }).catch(err => res.send("Database Error: " + err.message));
+            <hr style="border-color:#45a29e; margin-top:20px;">
+            <h3>👥 REGISTERED WORKERS TRACKING</h3>
+            <div id="workersContainer">
+                ${workerList || '<p style="text-align:center;color:#888;">No workers registered yet.</p>'}
+            </div>
+            
+            <hr style="border-color:#45a29e;">
+            <h3 style="margin-top:20px; text-align:left;"><a href="/admin/logs">📊 View Detailed Task Logs</a></h3>
+            <hr style="border-color:#45a29e; margin-top:20px;">
+            ${timewallIframe}
+        `));
 
     } else {
-        db.get("SELECT balance FROM users WHERE username = ?", [user], (err, row) => {
-            db.all("SELECT * FROM cpa_offers WHERE status = 'active'", [], (err, offers) => {
-                const currentBalance = row ? row.balance.toFixed(4) : '0.0000';
-                
-                let cpaSection = "";
-                if(offers && offers.length > 0) {
-                    let offersHtml = offers.map(o => {
-                        let trackingLink = o.offer_link.includes('?') ? `${o.offer_link}&subid=${user}` : `${o.offer_link}?subid=${user}`;
+        const { data: userData } = await supabase.from('users').select('balance').eq('username', user).single();
+        const { data: offers } = await supabase.from('cpa_offers').select('*').eq('status', 'active');
+        
+        const currentBalance = userData ? parseFloat(userData.balance).toFixed(4) : '0.0000';
+        
+        let cpaSection = "";
+        if(offers && offers.length > 0) {
+            let offersHtml = offers.map(o => {
+                let trackingLink = o.offer_link.includes('?') ? `${o.offer_link}&subid=${user}` : `${o.offer_link}?subid=${user}`;
 
-                        return `
-                            <div class="cpa-card">
-                                <h4 style="margin:0 0 5px 0; color:#66fcf1;">${o.offer_title}</h4>
-                                <p style="margin:5px 0; font-size:14px;">
-                                    <strong>${t.instructionTitle}</strong> 
-                                    <span class="translate-text">${o.instruction_en}</span>
-                                </p>
-                                <p style="margin:5px 0; color:#ff4d4d; font-weight:bold;">Reward: $${o.payout.toFixed(4)}</p>
-                                <a href="${trackingLink}" target="_blank"><button style="padding:8px; font-size:14px; margin-top:5px;">👉 Complete Task</button></a>
-                            </div>
-                        `;
-                    }).join('');
+                return `
+                    <div class="cpa-card">
+                        <h4 style="margin:0 0 5px 0; color:#66fcf1;">${o.offer_title}</h4>
+                        <p style="margin:5px 0; font-size:14px;">
+                            <strong>${t.instructionTitle}</strong> 
+                            <span class="translate-text">${o.instruction_en}</span>
+                        </p>
+                        <p style="margin:5px 0; color:#ff4d4d; font-weight:bold;">Reward: $${parseFloat(o.payout).toFixed(4)}</p>
+                        <a href="${trackingLink}" target="_blank"><button style="padding:8px; font-size:14px; margin-top:5px;">👉 Complete Task</button></a>
+                    </div>
+                `;
+            }).join('');
 
-                    // FIXED AUTOMATIC TRANSLATION SCRIPT (CORS BYPASS & STABLE FETCH)
-                    const translationScript = `
-                        <script>
-                            document.addEventListener("DOMContentLoaded", function() {
-                                let targetLang = "${currentLang}";
-                                if (targetLang === "en") return; 
-                                
-                                let elements = document.querySelectorAll('.translate-text');
-                                elements.forEach(el => {
-                                    let originalText = el.innerText;
-                                    let url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=" + targetLang + "&dt=t&q=" + encodeURIComponent(originalText);
-                                    
-                                    fetch(url)
-                                        .then(response => response.json())
-                                        .then(data => {
-                                            if(data && data[0] && data[0][0] && data[0][0][0]) {
-                                                el.innerText = data[0][0][0];
-                                            }
-                                        })
-                                        .catch(err => console.error("Translation Error: ", err));
+            const translationScript = `
+                <script>
+                    document.addEventListener("DOMContentLoaded", function() {
+                        let targetLang = "${currentLang}";
+                        if (targetLang === "en") return; 
+
+                        function translateElement(el) {
+                            if (el.classList.contains('translated')) return;
+                            let originalText = el.innerText;
+                            let url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=" + targetLang + "&dt=t&q=" + encodeURIComponent(originalText);
+                            
+                            fetch(url)
+                                .then(response => response.json())
+                                .then(data => {
+                                    if(data && data[0] && data[0][0] && data[0][0][0]) {
+                                        el.innerText = data[0][0][0];
+                                        el.classList.add('translated');
+                                    }
+                                })
+                                .catch(err => console.error("Translation Error: ", err));
+                        }
+
+                        document.querySelectorAll('.translate-text').forEach(translateElement);
+
+                        const observer = new MutationObserver((mutations) => {
+                            mutations.forEach((mutation) => {
+                                mutation.addedNodes.forEach((node) => {
+                                    if (node.nodeType === 1) {
+                                        if (node.classList.contains('translate-text')) translateElement(node);
+                                        node.querySelectorAll('.translate-text').forEach(translateElement);
+                                    }
                                 });
                             });
-                        </script>
-                    `;
+                        });
+                        observer.observe(document.body, { childList: true, subtree: true });
+                    });
+                </script>
+            `;
 
-                    cpaSection = `
-                        <h3 style="color:#66fcf1; text-align:left; margin-top:25px;">${t.cpaTasks}</h3>
-                        ${offersHtml}
-                        ${translationScript}
-                    `;
-                }
+            cpaSection = `
+                <h3 style="color:#66fcf1; text-align:left; margin-top:25px;">${t.cpaTasks}</h3>
+                ${offersHtml}
+                ${translationScript}
+            `;
+        }
 
-                res.send(htmlWrapper(req, 'Dashboard', `
-                    <a href="/logout" class="logout-btn">${t.logout}</a>
-                    <a href="/change-password" class="logout-btn" style="background:#45a29e;">🔑 Change Password</a>
-                    <h2>${t.welcome}, ${user}! ✨</h2>
-                    <div style="background:#0b0c10; padding:15px; border-radius:5px; margin-bottom:20px; border:1px solid #45a29e;">
-                        <span style="font-size:18px;">${t.total}:</span> 
-                        <span style="font-size:24px; color:#66fcf1; font-weight:bold; float:right;">$${currentBalance}</span>
-                    </div>
+        res.send(htmlWrapper(req, 'Dashboard', `
+            <a href="/logout" class="logout-btn">${t.logout}</a>
+            <a href="/change-password" class="logout-btn" style="background:#45a29e;">🔑 Change Password</a>
+            <h2>${t.welcome}, ${user}! ✨</h2>
+            <div style="background:#0b0c10; padding:15px; border-radius:5px; margin-bottom:20px; border:1px solid #45a29e;">
+                <span style="font-size:18px;">${t.total}:</span> 
+                <span style="font-size:24px; color:#66fcf1; font-weight:bold; float:right;">$${currentBalance}</span>
+            </div>
 
-                    ${cpaSection}
+            ${cpaSection}
 
-                    <div style="text-align:center; padding:40px; border:1px dashed #45a29e; border-radius:10px; margin-top:30px;">
-                        <h3 style="color:#66fcf1;">📢 System Maintenance Update</h3>
-                        <p style="color:#aaa; font-size:14px;">We are currently configuring your task board. New micro tasks will be available shortly! Keep an eye on your WhatsApp group.</p>
-                    </div>
-                `));
-            });
-        });
+            <div style="text-align:center; padding:40px; border:1px dashed #45a29e; border-radius:10px; margin-top:30px;">
+                <h3 style="color:#66fcf1;">📢 System Maintenance Update</h3>
+                <p style="color:#aaa; font-size:14px;">We are currently configuring your task board. New micro tasks will be available shortly! Keep an eye on your WhatsApp group.</p>
+            </div>
+        `));
     }
 });
 
 // 🔎 DETAILED LOGS WITH LIVE FILTER SEARCH
-app.get('/admin/logs', (req, res) => {
+app.get('/admin/logs', async (req, res) => {
     if (!req.session.user || req.session.user.username !== 'admin') return res.redirect('/');
     
-    db.all("SELECT * FROM task_logs ORDER BY timestamp DESC", [], (err, logs) => {
-        let logList = logs.map(l => `
-            <div class="user-row log-item" data-username="${l.username.toLowerCase()}" data-task="${l.task_name.toLowerCase()}" style="border-left-color: #66fcf1;">
-                <strong>Worker:</strong> <span class="worker-name">${l.username}</span> <br>
-                <strong>Task Details:</strong> ${l.task_name} <br>
-                <strong>Earned (After 30% Profit Cut):</strong> <span style="color:#66fcf1;">$${l.amount.toFixed(4)}</span> <br>
-                <small style="color:#aaa;">Time: ${l.timestamp}</small>
-            </div>
-        `).join('');
+    const { data: logs } = await supabase.from('task_logs').select('*').order('timestamp', { ascending: false });
+    
+    let logList = (logs || []).map(l => `
+        <div class="user-row log-item" data-username="${l.username.toLowerCase()}" data-task="${l.task_name.toLowerCase()}" style="border-left-color: #66fcf1;">
+            <strong>Worker:</strong> <span class="worker-name">${l.username}</span> <br>
+            <strong>Task Details:</strong> ${l.task_name} <br>
+            <strong>Earned (After 30% Profit Cut):</strong> <span style="color:#66fcf1;">$${parseFloat(l.amount).toFixed(4)}</span> <br>
+            <small style="color:#aaa;">Time: ${l.timestamp}</small>
+        </div>
+    `).join('');
 
-        const searchScript = `
-            <input type="text" id="logSearch" placeholder="🔍 Type Worker Username or Task name to filter..." style="width:95%; padding:12px; margin:15px 0; border:1px solid #66fcf1; border-radius:5px; background:#0b0c10; color:#fff;">
-            
-            <script>
-                document.getElementById('logSearch').addEventListener('input', function() {
-                    let filter = this.value.toLowerCase();
-                    let items = document.querySelectorAll('.log-item');
+    const searchScript = `
+        <input type="text" id="logSearch" placeholder="🔍 Type Worker Username or Task name to filter..." style="width:95%; padding:12px; margin:15px 0; border:1px solid #66fcf1; border-radius:5px; background:#0b0c10; color:#fff;">
+        
+        <script>
+            document.getElementById('logSearch').addEventListener('input', function() {
+                let filter = this.value.toLowerCase();
+                let items = document.querySelectorAll('.log-item');
+                
+                items.forEach(function(item) {
+                    let username = item.getAttribute('data-username');
+                    let taskName = item.getAttribute('data-task');
                     
-                    items.forEach(function(item) {
-                        let username = item.getAttribute('data-username');
-                        let taskName = item.getAttribute('data-task');
-                        
-                        if (username.includes(filter) || taskName.includes(filter)) {
-                            item.style.display = 'block';
-                        } else {
-                            item.style.display = 'none';
-                        }
-                    });
+                    if (username.includes(filter) || taskName.includes(filter)) {
+                        item.style.display = 'block';
+                    } else {
+                        item.style.display = 'none';
+                    }
                 });
-            </script>
-        `;
+            });
+        </script>
+    `;
 
-        res.send(htmlWrapper(req, 'Task Logs', `
-            <a href="/dashboard" style="font-size:14px;"><- Back to Control Panel</a>
-            <h2 style="color:#66fcf1; margin-top:15px;">Completed Task Logs</h2>
-            ${searchScript}
-            <div id="logsContainer" style="margin-top:10px;">
-                ${logList || '<p style="text-align:center;color:#888;">No tasks completed yet.</p>'}
-            </div>
-        `));
-    });
+    res.send(htmlWrapper(req, 'Task Logs', `
+        <a href="/dashboard" style="font-size:14px;"><- Back to Control Panel</a>
+        <h2 style="color:#66fcf1; margin-top:15px;">Completed Task Logs</h2>
+        ${searchScript}
+        <div id="logsContainer" style="margin-top:10px;">
+            ${logList || '<p style="text-align:center;color:#888;">No tasks completed yet.</p>'}
+        </div>
+    `));
 });
 
-app.get('/postback', (req, res) => {
+app.get('/postback', async (req, res) => {
     const { subid, reward, task_name } = req.query;
     if (subid && reward) {
         const workerReward = parseFloat(reward) * 0.70; 
-        db.run("UPDATE users SET balance = balance + ? WHERE username = ?", [workerReward, subid]);
-        db.run("INSERT INTO task_logs (username, task_name, amount) VALUES (?, ?, ?)", [subid, task_name || 'Micro Task', workerReward]);
+        
+        const { data: user } = await supabase.from('users').select('balance').eq('username', subid).single();
+        if (user) {
+            const newBalance = parseFloat(user.balance) + workerReward;
+            await supabase.from('users').update({ balance: newBalance }).eq('username', subid);
+            await supabase.from('task_logs').insert([{ username: subid, task_name: task_name || 'Micro Task', amount: workerReward }]);
+        }
         res.send('OK');
     } else {
         res.status(400).send('Invalid Parameters');
