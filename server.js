@@ -25,7 +25,7 @@ const translations = {
     },
     si: {
         title: "GALAXY WORKERS", login: "සේවක ඇතුල්වීම", reg: "සේවක ලියාපදිංචිය",
-        user: "පරිශීලක නාමය (Username)", pass: "මුරපදය (Password)", addr: "සම්පූර්ණ ලිපිනය", phone: "WhatsApp / දුරකථන අංකය",
+        user: "පරිශීලක නාමය (Username)", pass: "මුරපදය (Password)", addr: "සම්පූර්ණ ලිපිනය", phone: "WhatsApp / DUrakathana Ankaya",
         btnLog: "ඇතුල් වන්න", btnReg: "ලියාපදිංචි වන්න", noAcc: "ගිණුමක් නොමැතිද?", regHere: "මෙහි ලියාපදිංචි වන්න",
         backLog: "නැවත මුල් පිටුවට", welcome: "ආයුබෝවන්", total: "ඔබේ මුළු උපයනය", tasks: "කිරීමට ඇති සරල වැඩ (Tasks) 👇",
         subText: "පහත ඇති Tasks සම්පූර්ණ කරන්න. ඔබ උපයන මුදල් ස්වයංක්‍රීයවම ගිණුමට එකතු වේ.", logout: "ඉවත් වන්න (Logout)"
@@ -122,17 +122,20 @@ app.get('/logout', (req, res) => {
     res.redirect('/');
 });
 
-// 📊 DASHBOARD (දැන් Admin ට පැනල් එක සහ සයිට් එකේ Tasks දෙකම එකට පෙනේ)
+// 📊 DASHBOARD
 app.get('/dashboard', (req, res) => {
     if (!req.session.user) return res.redirect('/');
     const user = req.session.user.username;
     const t = translations[req.session.lang || 'en'];
 
-    // පොදු Timewall IFrame කොටස
+    // 💡 ⚠️ වැදගත්: පහත තියෙන "https://timewall.io/embed/your-widget-id" වෙනුවට ඔයාගේ Timewall Widget Embed ලින්ක් එක දාන්න!
+    const timewallWidgetBaseURL = "https://timewall.io/embed/your-widget-id"; 
+    const finalIframeSrc = `${timewallWidgetBaseURL}?subid=${user}`;
+
     const timewallIframe = `
         <h3 style="color:#66fcf1; margin-top:30px; text-align:left;">${t.tasks}</h3>
         <p style="font-size:13px; color:#aaa; text-align:left;">${t.subText}</p>
-        <iframe src="https://timewall.io/embed/your-widget-id-here" width="100%" height="600px" frameborder="0" style="border-radius:8px; background:#fff; margin-top:15px;"></iframe>
+        <iframe src="${finalIframeSrc}" width="100%" height="600px" frameborder="0" style="border-radius:8px; background:#fff; margin-top:15px;"></iframe>
     `;
 
     if (user === 'admin') {
@@ -154,7 +157,6 @@ app.get('/dashboard', (req, res) => {
                 <hr style="border-color:#45a29e;">
                 <h3 style="margin-top:20px; text-align:left;"><a href="/admin/logs">📊 View Detailed Task Logs</a></h3>
                 <hr style="border-color:#45a29e; margin-top:20px;">
-                
                 ${timewallIframe}
             `));
         });
