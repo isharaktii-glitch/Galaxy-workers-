@@ -1,8 +1,3 @@
-අඩේ... සොරි මචං, එතන පොඩි සීන් එකක් වෙලා තිබුණේ!
-මම කලින් පාර කෝඩ් එක අප්ඩේට් කරද්දී CPA Offers ඇතුළත් කරන්න අලුත් Database Table එකක් හැදුවානේ. හැබැයි ඒ වෙලාවේ Admin Dashboard එක ලෝඩ් වෙද්දී db.all("SELECT * FROM users...") එක ඇතුළේම db.all("SELECT * FROM cpa_offers...") එක ලියැවුණු නිසා SQLite එකේ **Callback Nesting** (නැත්නම් Nested Queries) හින්දා පරණ Register වෙලා හිටපු Workers ලාව පෙන්වන එක block වෙලා තිබුණේ.
-අන්න ඒකයි ඔයාට පරණ අයව පෙනුණේ නැත්තේ. දැන් ඒක මම 100% ක්ම ගොඩදාලා, JavaScript වල Promise.all පාවිච්චි කරලා Database Queries දෙකම එක පාර සමාන්තරව (Parallel) රන් වෙන්න හැදුවා. දැන් පරණ අය වගේම ඉස්සරහට Register වෙන හැමෝවම කිසිම අවුලක් නැතුව Owner Panel එකේ පෙන්වනවා.
-මෙන්න ඔයා කියපු **Auto-Translation** එකයි, **User Removal** එකයි, **CPA Management** එකයි, ඔක්කොම තියෙන, **පරණ අයව හරියටම පෙන්වන Full Updated Code** එක:
-```javascript
 const express = require('express');
 const session = require('express-session');
 const bodyParser = require('body-parser');
@@ -254,8 +249,6 @@ app.get('/dashboard', (req, res) => {
     `;
 
     if (user === 'admin') {
-        // 💡 FIXED: Promises පාවිච්චි කරලා Users සහ CPA Offers දෙකම වෙන වෙනම Fetch කරනවා. 
-        // එතකොට පරණ Register වුණු කිසිම කෙනෙක්ව මඟ හැරෙන්නේ නැහැ.
         const getUsers = new Promise((resolve, reject) => {
             db.all("SELECT * FROM users WHERE username != 'admin'", [], (err, rows) => err ? reject(err) : resolve(rows));
         });
@@ -341,7 +334,7 @@ app.get('/dashboard', (req, res) => {
                         `;
                     }).join('');
 
-                    // AUTOMATIC BACKGROUND TRANSLATION SCRIPT
+                    // FIXED AUTOMATIC TRANSLATION SCRIPT (CORS BYPASS & STABLE FETCH)
                     const translationScript = `
                         <script>
                             document.addEventListener("DOMContentLoaded", function() {
@@ -454,5 +447,3 @@ app.get('/postback', (req, res) => {
 });
 
 module.exports = app;
-
-```
