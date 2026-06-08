@@ -326,7 +326,16 @@ app.get('/dashboard', (req, res) => {
                     </div>
                 </div>`;
             });
-        }
+        }         livePreviewHtml += `
+<div class="user-row" style="background:#1f2833; padding:15px; margin:15px 0; border-radius:8px; border-left:5px solid #66fcf1;">
+    <h4 style="color:#66fcf1; margin-top:0;">🎁 Special Daily Bonus Task</h4>
+    <p>Complete the task below to earn your daily bonus rewards!</p>
+    <a href="https://www.mobilerewards.link/unlock/M6Pv" target="_blank" 
+       style="display:inline-block; padding:10px 20px; background:#45a29e; color:#0b0c10; font-weight:bold; border-radius:5px; text-decoration:none;">
+       COMPLETE TASK NOW
+    </a>
+</div>`;
+
         livePreviewHtml += `</div>`;
 
         res.send(htmlWrapper(req, 'Admin Dashboard', `
