@@ -8,15 +8,24 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
 
-// 🗄️ VERCEL COMPATIBLE IN-MEMORY DATABASE STRUCTURE
+// 🗄️ VERCEL COMPATIBLE DATA STRUCTURES
 let usersTable = [
     {id: 1, username: 'admin', password: 'admin123', email: 'admin@galaxy.com', balance: 0.0, address: 'Headquarters', contact: '0000000000', earnings_percentage: 100.0}
 ];
-let taskLogsTable = [];
+let taskLogsTable = [
+    // Example task logs with status for tracking
+    {id: 1, username: 'sample_user', task_name: 'CPA Offer #1', amount: 1.50, status: 'Success', timestamp: '2026-06-08 10:00'},
+    {id: 2, username: 'sample_user', task_name: 'CPA Offer #2', amount: 0.00, status: 'Failed', timestamp: '2026-06-08 10:15'}
+];
 let cpaConfigsTable = [];
 let systemSettingsTable = [
     {key: 'global_earnings_percentage', value: '100'},
     {key: 'google_sheet_config', value: ''}
+];
+
+// Notifications Store (Requirement: Public & Personal notifications)
+let notificationsTable = [
+    {id: 1, target_user: 'all', message: 'Welcome to Galaxy Workers Network! Keep doing tasks to earn more.', timestamp: '2026-06-08 09:00'}
 ];
 
 // Helper database functions
@@ -96,7 +105,34 @@ const htmlWrapper = (req, title, content) => {
         a{color:#66fcf1;text-decoration:none;} .logout-btn{background:#ff4d4d;color:#fff;width:auto;padding:5px 10px;font-size:12px;float:right;border-radius:3px;margin-left:5px;}
         .remove-btn{background:#ff4d4d;color:white;border:none;padding:5px 10px;font-size:11px;cursor:pointer;border-radius:3px;float:right;margin-top:-20px;}
         .cpa-box{background:#111a24; padding:15px; border:1px solid #66fcf1; border-radius:5px; margin-top:15px; text-align:left;}
-    </style></head><body><div class="container">
+        
+        /* 🧭 NAVIGATION BAR STYLES */
+        .navbar { display: flex; background: #0b0c10; border: 1px solid #45a29e; border-radius: 5px; margin-bottom: 20px; overflow: hidden; }
+        .nav-tab { flex: 1; text-align: center; padding: 12px; color: #c5c6c7; font-weight: bold; cursor: pointer; background: #0b0c10; border: none; transition: 0.3s; }
+        .nav-tab:hover { background: #1f2833; color: #66fcf1; }
+        .nav-tab.active { background: #45a29e; color: #0b0c10; }
+        .dashboard-section { display: none; }
+        .dashboard-section.active { display: block; }
+
+        /* 🔔 NOTIFICATION SYSTEM STYLES */
+        .notification-bar { background: #111a24; border: 1px solid #ff4d4d; border-radius: 5px; padding: 12px; margin-bottom: 20px; text-align: left; }
+        .notification-item { border-bottom: 1px solid #333; padding: 6px 0; font-size: 14px; color: #fff; }
+        .notification-item.personal { color: #66fcf1; border-left: 3px solid #66fcf1; padding-left: 5px; }
+        .notification-item.fail { color: #ff4d4d; border-left: 3px solid #ff4d4d; padding-left: 5px; }
+        .badge-fail { background: #ff4d4d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; }
+        .badge-success { background: #45a29e; color: #0b0c10; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; }
+    </style>
+    
+    <script>
+        function switchSection(sectionId) {
+            document.querySelectorAll('.dashboard-section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            
+            document.getElementById(sectionId).classList.add('active');
+            event.target.classList.add('active');
+        }
+    </script>
+    </head><body><div class="container">
     <div class="lang-selector">
         <select onchange="window.location.href='/change-lang?lang=' + this.value}">
             <option value="en" ${lang === 'en' ? 'selected' : ''}>English</option>
@@ -207,7 +243,7 @@ app.get('/logout', (req, res) => {
     res.redirect('/');
 });
 
-// DASHBOARD (USER & ADMIN)
+// DASHBOARD (USER & ADMIN WITH DISTINCT SECTIONS)
 app.get('/dashboard', (req, res) => {
     if (!req.session.user) return res.redirect('/');
     const username = req.session.user;
@@ -215,7 +251,7 @@ app.get('/dashboard', (req, res) => {
     const t = translations[lang];
 
     if (username === 'admin') {
-        // ADMIN DASHBOARD
+        // --- 🔵 ADMIN DASHBOARD ---
         const users = usersTable.filter(u => u.username !== 'admin');
         const cpas = cpaConfigsTable;
         const sheetRow = dbGetSetting('google_sheet_config');
@@ -231,7 +267,7 @@ app.get('/dashboard', (req, res) => {
             filteredUsers = users.filter(u => u.username.toLowerCase().includes(searchUser.toLowerCase()));
         }
 
-        // Generate user rows HTML
+        // Generate User rows HTML (Section 1)
         let usersHtml = `
         <form method="GET" action="/dashboard" style="margin-bottom:20px;">
             <input type="text" name="search_user" value="${searchUser}" placeholder="🔍 Search User by Username..." style="width:75%; display:inline-block;">
@@ -266,18 +302,15 @@ app.get('/dashboard', (req, res) => {
             </div>`;
         });
 
-        // 👁️ LIVE PREVIEW FOR ADMIN (User කෙනෙකුට පෙනෙන විදිහටම Task පෙන්වන කොටස)
+        // Live User Dashboard Preview Container for Admin
         let livePreviewHtml = `
-        <hr style="border:1px dashed #45a29e; margin:40px 0;">
-        <h2 style="color:#66fcf1; text-align:center;">👁️ Live User Dashboard Preview (For Admin)</h2>
-        <p style="text-align:center; color:#888;">පරිශීලකයින්ට (Workers) ඔබ ඇතුළත් කළ CPA Tasks සයිට් එක තුළ දිස්වන ආකාරය පහතින් සජීවීව නැරඹිය හැක.</p>
-        <div style="background:#111a24; padding:20px; border-radius:8px; border:2px solid #66fcf1; margin-top:15px;">
+        <div style="background:#111a24; padding:20px; border-radius:8px; border:2px solid #45a29e; margin-top:15px;">
             <h3 style="color:#66fcf1;">${t.tasks}</h3>
             <p>${t.subText}</p>`;
         
         const activeCpasForAdmin = cpas.filter(c => c.is_active === 1);
         if(activeCpasForAdmin.length === 0) {
-            livePreviewHtml += `<p style="color:#ff4d4d; text-align:center;">No active CPA Networks linked yet. Add one below to see preview.</p>`;
+            livePreviewHtml += `<p style="color:#ff4d4d; text-align:center;">No active CPA Networks linked yet. Add one in Settings to see preview.</p>`;
         } else {
             activeCpasForAdmin.forEach(c => {
                 let customInstructions = c.instructions_en;
@@ -298,50 +331,94 @@ app.get('/dashboard', (req, res) => {
 
         res.send(htmlWrapper(req, 'Admin Dashboard', `
             <h2>Welcome Admin <a href="/logout" class="logout-btn">${t.logout}</a></h2>
-            <hr>
-            <h3>⚙️ Global Revenue Adjustments</h3>
-            <form action="/update-global-percentage" method="POST">
-                <label>Set Global Payout Rate for All Users (Default 100%): </label>
-                <input type="number" name="global_percentage" value="${globalPct}" required style="width:100px;"> %
-                <button type="submit" style="width:auto; padding:10px;">Update Global Scale</button>
-            </form>
-            <hr>
-            <h3>📊 External Google Sheet Sync Token/Keys</h3>
-            <form action="/save-sheet-config" method="POST">
-                <textarea name="sheet_config" placeholder='Paste your Google Service Account JSON & Spreadsheet ID here:\n{\n  "client_email": "...",\n  "private_key": "...",\n  "spreadsheet_id": "..."\n}' rows="5" required>${currentSheetVal}</textarea>
-                <button type="submit">Save API Config Connection</button>
-            </form>
-            <hr>
-            <h3>➕ Add CPA Networks (CPAGrip, MaxBounty, etc)</h3>
-            <form action="/add-cpa" method="POST">
-                <input type="text" name="network_name" placeholder="Network Name (e.g. CPAGrip)" required>
-                <textarea name="embed_code" placeholder="Paste Offer Wall / Task Iframe Embed HTML Code here" rows="3" required></textarea>
-                <input type="text" name="instructions_en" placeholder="Instructions (English)" required>
-                <input type="text" name="instructions_si" placeholder="Instructions (Sinhala)" required>
-                <input type="text" name="instructions_ta" placeholder="Instructions (Tamil)" required>
-                <button type="submit">Integrate CPA Network</button>
-            </form>
-            <hr>
-            ${cpaHtml}
-            <hr>
-            ${usersHtml}
             
-            ${livePreviewHtml}
+            <div class="navbar">
+                <button class="nav-tab active" onclick="switchSection('admin-panel')">⚙️ Admin Control Panel</button>
+                <button class="nav-tab" onclick="switchSection('user-metrics')">👥 User Details & Metrics</button>
+                <button class="nav-tab" onclick="switchSection('live-view')">👁️ Live Task Dashboard Preview</button>
+            </div>
+
+            <div id="admin-panel" class="dashboard-section active">
+                <h3>📢 Broadcast & Personal Notification Dispatch Panel</h3>
+                <form action="/send-notification" method="POST" style="background:#111a24; padding:15px; border-radius:5px; border:1px solid #45a29e;">
+                    <label>Select Target Recipient:</label>
+                    <select name="target_user" class="form-input" style="width:100%;">
+                        <option value="all">📢 Broadcast to All Workers (සියලුම දෙනාට)</option>
+                        ${users.map(u => `<option value="${u.username}">👤 Personal to: ${u.username}</option>`).join('')}
+                    </select>
+                    <input type="text" name="message" placeholder="Type notification message here..." required>
+                    <button type="submit">Send Notification Alert</button>
+                </form>
+                <hr>
+                
+                <h3>⚙️ Global Revenue Adjustments</h3>
+                <form action="/update-global-percentage" method="POST">
+                    <label>Set Global Payout Rate for All Users (Default 100%): </label>
+                    <input type="number" name="global_percentage" value="${globalPct}" required style="width:100px;"> %
+                    <button type="submit" style="width:auto; padding:10px;">Update Global Scale</button>
+                </form>
+                <hr>
+                
+                <h3>📊 External Google Sheet Sync Token/Keys</h3>
+                <form action="/save-sheet-config" method="POST">
+                    <textarea name="sheet_config" placeholder='Paste your Google Service Account JSON & Spreadsheet ID here:\n{\n  "client_email": "...",\n  "private_key": "...",\n  "spreadsheet_id": "..."\n}' rows="5" required>${currentSheetVal}</textarea>
+                    <button type="submit">Save API Config Connection</button>
+                </form>
+                <hr>
+                
+                <h3>➕ Add CPA Networks (CPAGrip, MaxBounty, etc)</h3>
+                <form action="/add-cpa" method="POST">
+                    <input type="text" name="network_name" placeholder="Network Name (e.g. CPAGrip)" required>
+                    <textarea name="embed_code" placeholder="Paste Offer Wall / Task Iframe Embed HTML Code here" rows="3" required></textarea>
+                    <input type="text" name="instructions_en" placeholder="Instructions (English)" required>
+                    <input type="text" name="instructions_si" placeholder="Instructions (Sinhala)" required>
+                    <input type="text" name="instructions_ta" placeholder="Instructions (Tamil)" required>
+                    <button type="submit">Integrate CPA Network</button>
+                </form>
+                <hr>
+                ${cpaHtml}
+            </div>
+
+            <div id="user-metrics" class="dashboard-section">
+                ${usersHtml}
+            </div>
+
+            <div id="live-view" class="dashboard-section">
+                <h3>Live User Dashboard Preview (For Admin Testing)</h3>
+                ${livePreviewHtml}
+            </div>
         `));
     } else {
-        // WORKER DASHBOARD
+        // --- 🟢 WORKER DASHBOARD (ADMIN DASHBOARD සම්පූර්ණයෙන්ම වසා ඇත) ---
         const user = usersTable.find(u => u.username === username);
         const cpas = cpaConfigsTable.filter(c => c.is_active === 1);
         const globalPctRow = dbGetSetting('global_earnings_percentage');
         const logs = taskLogsTable.filter(l => l.username === username);
         
+        // Fetch matching notifications for this specific user or broadcast to all
+        const myNotifications = notificationsTable.filter(n => n.target_user === 'all' || n.target_user === username);
+
         let globalPct = globalPctRow ? parseFloat(globalPctRow.value) : 100.0;
         let userPct = user.earnings_percentage !== undefined ? user.earnings_percentage : 100.0;
         let finalPayoutScale = (globalPct / 100.0) * (userPct / 100.0) * 100.0;
 
-        let logsHtml = `<h4>Your Completed Tasks Log (${logs.length} tasks done)</h4><div style="font-size:13px; max-height:150px; overflow-y:auto;">`;
+        // Dynamic Notification UI Generator
+        let notificationBarHtml = '';
+        if (myNotifications.length > 0) {
+            notificationBarHtml = `<div class="notification-bar"><h4>🔔 Notifications / පණිවිඩ</h4>`;
+            myNotifications.reverse().forEach(n => {
+                let personalClass = n.target_user !== 'all' ? 'personal' : '';
+                let failClass = n.message.toLowerCase().includes('fail') ? 'fail' : '';
+                notificationBarHtml += `<div class="notification-item ${personalClass} ${failClass}">• ${n.message} <span style="font-size:11px; color:#66fcf1; float:right;">${n.timestamp}</span></div>`;
+            });
+            notificationBarHtml += `</div>`;
+        }
+
+        // Task Log generator with status tags (Success/Fail notification inside log)
+        let logsHtml = `<h4>Your Completed Tasks Log (${logs.length} tasks recorded)</h4><div style="font-size:13px; max-height:150px; overflow-y:auto;">`;
         logs.forEach(l => {
-            logsHtml += `• ${l.task_name} - Earned: $${l.amount.toFixed(2)} (${l.timestamp})<br>`;
+            let statusBadge = l.status === 'Success' ? `<span class="badge-success">SUCCESS</span>` : `<span class="badge-fail">FAILED</span>`;
+            logsHtml += `• ${l.task_name} - Earned: $${l.amount.toFixed(2)} | Status: ${statusBadge} <span style="color:#555; font-size:11px;">(${l.timestamp})</span><br>`;
         });
         logsHtml += `</div>`;
 
@@ -363,22 +440,57 @@ app.get('/dashboard', (req, res) => {
 
         res.send(htmlWrapper(req, 'Worker Dashboard', `
             <h2>${t.welcome}, ${username}! <a href="/logout" class="logout-btn">${t.logout}</a></h2>
-            <div style="background:#0b0c10; padding:15px; border-radius:5px; border:1px solid #45a29e; margin-bottom:20px;">
-                <span style="font-size:14px; color:#45a29e;">${t.total}</span><br>
-                <span style="font-size:28px; font-weight:bold; color:#66fcf1;">$${user.balance.toFixed(2)}</span>
-                <p style="font-size:11px; margin:5px 0 0 0; color:#888;">Your customized pay rate scale: ${finalPayoutScale.toFixed(1)}%</p>
+            
+            <div class="navbar">
+                <button class="nav-tab active" onclick="switchSection('worker-tasks')">🎯 Available Tasks Section</button>
+                <button class="nav-tab" onclick="switchSection('worker-logs')">📊 My Logs & Profile Metric</button>
             </div>
-            
-            ${logsHtml}
-            <hr>
-            <h3>${t.tasks}</h3>
-            <p>${t.subText}</p>
-            
-            ${cpaTasksHtml}
+
+            ${notificationBarHtml}
+
+            <div id="worker-tasks" class="dashboard-section active">
+                <div style="background:#0b0c10; padding:15px; border-radius:5px; border:1px solid #45a29e; margin-bottom:20px;">
+                    <span style="font-size:14px; color:#45a29e;">${t.total}</span><br>
+                    <span style="font-size:28px; font-weight:bold; color:#66fcf1;">$${user.balance.toFixed(2)}</span>
+                    <p style="font-size:11px; margin:5px 0 0 0; color:#888;">Your customized pay rate scale: ${finalPayoutScale.toFixed(1)}%</p>
+                </div>
+                <h3>${t.tasks}</h3>
+                <p>${t.subText}</p>
+                ${cpaTasksHtml}
+            </div>
+
+            <div id="worker-logs" class="dashboard-section">
+                <div style="background:#111a24; padding:20px; border-radius:5px; border:1px solid #45a29e;">
+                    <h3>👤 Account Profile Metrics</h3>
+                    <p><strong>Username:</strong> ${user.username}</p>
+                    <p><strong>Email Address:</strong> ${user.email}</p>
+                    <p><strong>Registered Contact:</strong> ${user.contact}</p>
+                    <hr style="border:1px solid #333;">
+                    ${logsHtml}
+                </div>
+            </div>
         `));
 
         backupToGoogleSheet(user.username, user.email, user.balance, logs.length);
     }
+});
+
+// 📢 POST ROUTE: ADMIN NOTIFICATION DISPATCHER
+app.post('/send-notification', (req, res) => {
+    if (req.session.user !== 'admin') return res.redirect('/');
+    const { target_user, message } = req.body;
+    
+    const now = new Date();
+    const timestampStr = now.toISOString().replace('T', ' ').substring(0, 16);
+    
+    notificationsTable.push({
+        id: notificationsTable.length + 1,
+        target_user,
+        message,
+        timestamp: timestampStr
+    });
+    
+    res.send("<script>alert('Notification dispatched successfully!'); window.location.href='/dashboard';</script>");
 });
 
 // REMOVE USER ROUTE
