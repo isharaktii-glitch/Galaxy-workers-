@@ -9,6 +9,6 @@
     "express": "^4.19.2",
     "express-session": "^1.18.0",
     "body-parser": "^1.20.2",
-    "@supabase/supabase-js": "^2.39.0"
+    "googleapis": "^126.0.0"
   }
 }
