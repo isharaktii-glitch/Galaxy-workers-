@@ -9,9 +9,6 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
 
 // 🗄️ VERCEL COMPATIBLE IN-MEMORY DATABASE STRUCTURE
-// Vercel serverless නිසා local sqlite file ක්‍රියා කරන්නේ නැත.
-// එමනිසා, සේවාදායකය සක්‍රීයව පවතින විට දත්ත මතකයේ තබා ගන්නා අතර,
-// Google Sheet Integration එක හරහා ස්ථිරව සුරැකීම සිදු වේ.
 let usersTable = [
     {id: 1, username: 'admin', password: 'admin123', email: 'admin@galaxy.com', balance: 0.0, address: 'Headquarters', contact: '0000000000', earnings_percentage: 100.0}
 ];
@@ -34,7 +31,7 @@ const dbSaveSetting = (key, value) => {
     else systemSettingsTable.push({key, value});
 };
 
-// Google Sheets වෙත දත්ත Backup කිරීමේ Function එක (Requirement 5)
+// Google Sheets Backup Function
 async function backupToGoogleSheet(username, email, balance, taskCount) {
     const row = dbGetSetting('google_sheet_config');
     if (!row || !row.value) return; 
@@ -227,14 +224,14 @@ app.get('/dashboard', (req, res) => {
         let currentSheetVal = sheetRow ? sheetRow.value : '';
         let globalPct = globalPctRow ? globalPctRow.value : '100';
 
-        // Requirement 2: User Search Functionality
+        // Search Functionality
         let searchUser = req.query.search_user || '';
         let filteredUsers = users;
         if(searchUser) {
             filteredUsers = users.filter(u => u.username.toLowerCase().includes(searchUser.toLowerCase()));
         }
 
-        // Requirement 1: Generate user rows HTML
+        // Generate user rows HTML
         let usersHtml = `
         <form method="GET" action="/dashboard" style="margin-bottom:20px;">
             <input type="text" name="search_user" value="${searchUser}" placeholder="🔍 Search User by Username..." style="width:75%; display:inline-block;">
@@ -269,6 +266,36 @@ app.get('/dashboard', (req, res) => {
             </div>`;
         });
 
+        // 👁️ LIVE PREVIEW FOR ADMIN (User කෙනෙකුට පෙනෙන විදිහටම Task පෙන්වන කොටස)
+        let livePreviewHtml = `
+        <hr style="border:1px dashed #45a29e; margin:40px 0;">
+        <h2 style="color:#66fcf1; text-align:center;">👁️ Live User Dashboard Preview (For Admin)</h2>
+        <p style="text-align:center; color:#888;">පරිශීලකයින්ට (Workers) ඔබ ඇතුළත් කළ CPA Tasks සයිට් එක තුළ දිස්වන ආකාරය පහතින් සජීවීව නැරඹිය හැක.</p>
+        <div style="background:#111a24; padding:20px; border-radius:8px; border:2px solid #66fcf1; margin-top:15px;">
+            <h3 style="color:#66fcf1;">${t.tasks}</h3>
+            <p>${t.subText}</p>`;
+        
+        const activeCpasForAdmin = cpas.filter(c => c.is_active === 1);
+        if(activeCpasForAdmin.length === 0) {
+            livePreviewHtml += `<p style="color:#ff4d4d; text-align:center;">No active CPA Networks linked yet. Add one below to see preview.</p>`;
+        } else {
+            activeCpasForAdmin.forEach(c => {
+                let customInstructions = c.instructions_en;
+                if (lang === 'si') customInstructions = c.instructions_si;
+                if (lang === 'ta') customInstructions = c.instructions_ta;
+
+                livePreviewHtml += `
+                <div class="cpa-box" style="border-color:#45a29e;">
+                    <h4>🎯 ${c.network_name} - ${t.taskInstr}</h4>
+                    <p style="color:#66fcf1; font-size:14px;">${customInstructions}</p>
+                    <div style="background: #fff; padding: 5px; border-radius: 5px;">
+                        ${c.embed_code}
+                    </div>
+                </div>`;
+            });
+        }
+        livePreviewHtml += `</div>`;
+
         res.send(htmlWrapper(req, 'Admin Dashboard', `
             <h2>Welcome Admin <a href="/logout" class="logout-btn">${t.logout}</a></h2>
             <hr>
@@ -298,6 +325,8 @@ app.get('/dashboard', (req, res) => {
             ${cpaHtml}
             <hr>
             ${usersHtml}
+            
+            ${livePreviewHtml}
         `));
     } else {
         // WORKER DASHBOARD
@@ -310,14 +339,12 @@ app.get('/dashboard', (req, res) => {
         let userPct = user.earnings_percentage !== undefined ? user.earnings_percentage : 100.0;
         let finalPayoutScale = (globalPct / 100.0) * (userPct / 100.0) * 100.0;
 
-        // Requirement 1: Display Task Log
         let logsHtml = `<h4>Your Completed Tasks Log (${logs.length} tasks done)</h4><div style="font-size:13px; max-height:150px; overflow-y:auto;">`;
         logs.forEach(l => {
             logsHtml += `• ${l.task_name} - Earned: $${l.amount.toFixed(2)} (${l.timestamp})<br>`;
         });
         logsHtml += `</div>`;
 
-        // Requirement 4 & 7: CPA Sites masking via clean Wrapper
         let cpaTasksHtml = '';
         cpas.forEach(c => {
             let customInstructions = c.instructions_en;
@@ -350,12 +377,11 @@ app.get('/dashboard', (req, res) => {
             ${cpaTasksHtml}
         `));
 
-        // Silent sheet trigger backup
         backupToGoogleSheet(user.username, user.email, user.balance, logs.length);
     }
 });
 
-// Requirement 3: REMOVE USER ROUTE
+// REMOVE USER ROUTE
 app.get('/remove-user', (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const userId = parseInt(req.query.id);
@@ -363,7 +389,7 @@ app.get('/remove-user', (req, res) => {
     res.send("<script>alert('User removed successfully.'); window.location.href='/dashboard';</script>");
 });
 
-// Requirement 6: UPDATE USER PAY PERCENTAGE
+// UPDATE USER PAY PERCENTAGE
 app.post('/update-user-percentage', (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const { username, percentage } = req.body;
@@ -372,7 +398,7 @@ app.post('/update-user-percentage', (req, res) => {
     res.redirect('/dashboard');
 });
 
-// Requirement 6: UPDATE GLOBAL PAY PERCENTAGE
+// UPDATE GLOBAL PAY PERCENTAGE
 app.post('/update-global-percentage', (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const { global_percentage } = req.body;
@@ -380,7 +406,7 @@ app.post('/update-global-percentage', (req, res) => {
     res.redirect('/dashboard');
 });
 
-// Requirement 5: SAVE GOOGLE SHEET CONFIG
+// SAVE GOOGLE SHEET CONFIG
 app.post('/save-sheet-config', (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const { sheet_config } = req.body;
@@ -388,7 +414,7 @@ app.post('/save-sheet-config', (req, res) => {
     res.send("<script>alert('Google Sheet Configuration Saved!'); window.location.href='/dashboard';</script>");
 });
 
-// Requirement 7: ADD CPA NETWORK ROUTE
+// ADD CPA NETWORK ROUTE
 app.post('/add-cpa', (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const { network_name, embed_code, instructions_en, instructions_si, instructions_ta } = req.body;
@@ -407,7 +433,7 @@ app.get('/remove-cpa', (req, res) => {
     res.redirect('/dashboard');
 });
 
-module.exports = app; // Vercel deployment handler සඳහා අවශ්‍ය වේ
+module.exports = app;
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
