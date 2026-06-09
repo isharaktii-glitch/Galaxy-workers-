@@ -1,12 +1,10 @@
 const express = require('express');
 const session = require('express-session');
 const bodyParser = require('body-parser');
-const { google } = require('googleapis');
-const { Pool } = require('pg'); // Neon Database සඳහා අවශ්‍ය වේ
+const { Pool } = require('pg');
 
 const app = express();
 
-// Neon Database Connection
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
@@ -15,53 +13,40 @@ const pool = new Pool({
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
 
-// HTML Wrapper (ඔබේ කලින් තිබූ කෝඩ් එකමයි)
-const htmlWrapper = (req, title, content) => {
-    return `<!DOCTYPE html><html><head><title>${title}</title>
-    <style>body{background:#0b0c10;color:#c5c6c7;font-family:sans-serif;padding:20px;}</style>
-    </head><body><div class="container">${content}</div></body></html>`;
-};
-
-// --- ROUTES ---
-
-// 1. Home / Login Page
+// Root route - Login page
 app.get('/', (req, res) => {
-    res.send(htmlWrapper(req, "Login", `<h2>Login</h2><form action="/login" method="POST"><input type="text" name="username" placeholder="Username"><input type="password" name="password" placeholder="Password"><button type="submit">Login</button></form>`));
+    res.send(`
+        <h2>Login</h2>
+        <form action="/login" method="POST">
+            <input type="text" name="username" placeholder="Username" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <button type="submit">Login</button>
+        </form>
+    `);
 });
 
-// 2. Login Logic
+// Login handle
 app.post('/login', async (req, res) => {
     const { username, password } = req.body;
     try {
-        // Neon Database වෙතින් පරිශීලකයා පරීක්ෂා කිරීම
         const result = await pool.query('SELECT * FROM users WHERE username = $1 AND password = $2', [username, password]);
         if (result.rows.length > 0) {
             req.session.user = result.rows[0];
             res.redirect('/dashboard');
         } else {
-            res.send("Invalid credentials! <a href='/'>Back</a>");
+            res.send("Invalid details!");
         }
     } catch (err) {
-        res.status(500).send("Database Error");
+        res.status(500).send("Database error: " + err.message);
     }
 });
 
-// 3. Dashboard Route (දැන් මෙය නිවැරදිව ක්‍රියා කරයි)
+// Dashboard route - මෙන්න මේකයි දැන් නැත්තේ
 app.get('/dashboard', (req, res) => {
     if (!req.session.user) return res.redirect('/');
-    
-    const content = `
-        <h1>Welcome, ${req.session.user.username}</h1>
-        <p>Your Balance: $${req.session.user.balance}</p>
-        <a href="/logout">Logout</a>
-    `;
-    res.send(htmlWrapper(req, "Dashboard", content));
+    res.send(`<h1>Welcome to Dashboard</h1><p>Hello ${req.session.user.username}!</p><a href="/">Home</a>`);
 });
 
-// 4. Logout
-app.get('/logout', (req, res) => {
-    req.session.destroy();
-    res.redirect('/');
-});
-
-app.listen(3000, () => console.log("Server running on port 3000"));
+// Vercel සඳහා Port එක
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log("Server running on port " + port));
