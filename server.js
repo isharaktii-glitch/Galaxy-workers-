@@ -12,20 +12,27 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
 
-// 🗄️ NEON DATABASE INITIALIZATION
+// 🗄️ NEON DATABASE INITIALIZATION WITH COLUMN AUTO-MIGRATION
 async function initDb() {
     try {
-        // Users Table
+        // Create base table if it doesn't exist
         await sql(`CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
             username VARCHAR(50) UNIQUE NOT NULL,
             password VARCHAR(50) NOT NULL,
-            email VARCHAR(100) NOT NULL,
-            address TEXT,
-            contact VARCHAR(20),
-            balance_numeric NUMERIC(10,2) DEFAULT 0.0,
-            earnings_percentage NUMERIC(5,2) DEFAULT 100.0
+            email VARCHAR(100) NOT NULL
         )`);
+
+        // 🚨 AUTO-MIGRATION: Check and add missing columns if table already exists
+        try {
+            await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT`);
+            await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS contact VARCHAR(20)`);
+            await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_numeric NUMERIC(10,2) DEFAULT 0.0`);
+            await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS earnings_percentage NUMERIC(5,2) DEFAULT 100.0`);
+            console.log("Database schema migrated successfully (Columns checked)!");
+        } catch (migrationErr) {
+            console.log("Migration columns check note:", migrationErr.message);
+        }
 
         // Task Logs Table
         await sql(`CREATE TABLE IF NOT EXISTS task_logs (
@@ -179,7 +186,7 @@ const htmlWrapper = (req, title, content) => {
         .dashboard-section { display: none; }
         .dashboard-section.active { display: block; }
         
-        /* 🚨 PERFECT MOBILE BOX GRID FIX (No more overlapping or screen jumping) */
+        /* 🚨 STABLE BOX GRID FIX (Prevents overflowing layout tabs) */
         .stats-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; width: 100%; box-sizing: border-box; }
         .stat-card { flex: 1; min-width: calc(33.333% - 12px); background: #0b0c10; border: 1px solid #45a29e; padding: 15px; border-radius: 8px; text-align: center; box-sizing: border-box; }
         @media (max-width: 600px) {
@@ -269,13 +276,16 @@ app.post('/register', async (req, res) => {
         if (exists && exists.length > 0) {
             return res.send("<script>alert('Username already exists!'); window.location.href='/register';</script>");
         }
+        
+        // Securely inserts the complete profile schema directly into database
         await sql(`INSERT INTO users (username, password, email, address, contact, balance_numeric, earnings_percentage) 
                    VALUES ($1, $2, $3, $4, $5, 0.0, 100.0)`);
         
         backupToGoogleSheet(username, email, 0.0, 0).catch(e => {}); 
         res.send("<script>alert('Registration Successful!'); window.location.href='/';</script>");
     } catch (err) {
-        res.send(`<script>alert('Error registering user.'); window.location.href='/register';</script>`);
+        console.error("Register Post DB Error Log:", err);
+        res.send(`<script>alert('Error registering user. Technical Info: ${err.message.replace(/'/g, "\\'")}'); window.location.href='/register';</script>`);
     }
 });
 
@@ -395,7 +405,7 @@ app.get('/dashboard', async (req, res) => {
                 });
             }
 
-            // 🎯 ADMIN LIVE PREVIEW SECTION (Fixed & fully implemented)
+            // ADMIN LIVE PREVIEW SECTION
             let adminTaskSectionHtml = `
             <h3>🎯 Live Tasks Checker (Admin View)</h3>
             <p style="color:#a5a6a7; font-size:14px;">පහත දැක්වෙන්නේ ඔයා අලුතින් Upload කරපු Task, User ලට පෙනෙන ආකාරයයි. Admin ටද මෙතැනින් ඒවා ක්‍රියා කරවා පරීක්ෂා කළ හැක.</p>`;
@@ -451,7 +461,7 @@ app.get('/dashboard', async (req, res) => {
                 <div id="admin-tasks" class="dashboard-section">${adminTaskSectionHtml}</div>
             `));
         } else {
-            // WORKER VIEW (Clean Responsive Layout Fixed)
+            // WORKER VIEW
             const userRow = await sql(`SELECT * FROM users WHERE username = $1`, [username]);
             const user = userRow[0];
             const cpas = await sql(`SELECT * FROM cpa_configs WHERE is_active = 1`);
@@ -461,7 +471,6 @@ app.get('/dashboard', async (req, res) => {
             let pendingCount = logs.filter(l => l.status === 'Pending').length;
             let completedCount = logs.filter(l => l.status === 'Success').length;
 
-            // 🚨 STABLE STATS GRID (Will wrap neatly on narrow screens)
             let statsHtml = `
             <div class="stats-grid">
                 <div class="stat-card"><h3>$${currentBal.toFixed(2)}</h3><p>AVAILABLE BALANCE</p></div>
