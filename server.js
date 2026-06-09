@@ -34,7 +34,7 @@ async function initDb() {
             task_name VARCHAR(100) NOT NULL,
             proof_data TEXT,
             amount NUMERIC(10,2) DEFAULT 0.50,
-            status VARCHAR(20) NOT NULL, -- Pending, Success, Failed
+            status VARCHAR(20) NOT NULL,
             timestamp VARCHAR(50) NOT NULL
         )`);
 
@@ -66,7 +66,7 @@ async function initDb() {
             timestamp VARCHAR(50) NOT NULL
         )`);
 
-        console.log("Neon Database Tables Initialized/Reset Successfully!");
+        console.log("Neon Database Tables Initialized Successfully!");
     } catch (err) {
         console.error("Database Init Error:", err);
     }
@@ -86,11 +86,6 @@ async function dbGetSetting(key) {
         const rows = await sql(`SELECT value FROM system_settings WHERE key = $1`, [key]);
         return rows.length > 0 ? { key, value: rows[0].value } : null;
     } catch (e) { return null; }
-}
-
-async function dbSaveSetting(key, value) {
-    await sql(`INSERT INTO system_settings (key, value) VALUES ($1, $2) 
-               ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [key, value]);
 }
 
 async function backupToGoogleSheet(username, email, balance, taskCount) {
@@ -147,44 +142,54 @@ const htmlWrapper = (req, title, content) => {
     const t = translations[lang];
     return `<!DOCTYPE html><html lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title>
     <style>
-        body{background:#0b0c10;color:#c5c6c7;font-family:sans-serif;padding:20px;margin:0;} 
-        .container{max-width:850px;margin:30px auto;background:#1f2833;padding:25px;border-radius:10px;border:1px solid #45a29e;box-shadow: 0px 0px 15px rgba(69, 162, 158, 0.2);position:relative;}
-        .lang-selector { position: absolute; top: 15px; right: 15px; }
-        .lang-selector select { background: #0b0c10; color: #66fcf1; border: 1px solid #45a29e; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        input, textarea, select.form-input {width:95%;padding:10px;margin:8px 0;border-radius:5px;border:1px solid #45a29e;background:#0b0c10;color:#fff;} 
+        body{background:#0b0c10;color:#c5c6c7;font-family:sans-serif;padding:15px;margin:0;} 
+        .container{max-width:850px;margin:20px auto;background:#1f2833;padding:20px;border-radius:10px;border:1px solid #45a29e;box-shadow: 0px 0px 15px rgba(69, 162, 158, 0.2);position:relative;box-sizing:border-box;}
+        
+        .header-block { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #45a29e; padding-bottom: 15px; flex-wrap: wrap; gap: 10px; }
+        .header-title { color:#66fcf1; margin: 0; font-size: 24px; font-weight: bold; }
+        .header-actions { display: flex; align-items: center; gap: 10px; }
+
+        .lang-selector select { background: #0b0c10; color: #66fcf1; border: 1px solid #45a29e; padding: 6px 10px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        input, textarea, select.form-input {width:100%; padding:10px; margin:8px 0; border-radius:5px; border:1px solid #45a29e; background:#0b0c10; color:#fff; box-sizing: border-box;} 
         button{width:100%;padding:12px;background:#45a29e;border:none;color:#0b0c10;font-weight:bold;font-size:16px;border-radius:5px;cursor:pointer;margin-top:10px;}
         button:hover{background:#66fcf1;}
         
-        /* Fixed layout alignment for User rows to prevent overlap */
-        .user-row{background:#0b0c10;padding:15px;margin:12px 0;border-radius:5px;border-left:5px solid #45a29e;text-align:left;position:relative;display:block;clear:both;}
-        .user-meta-block { margin-bottom: 10px; line-height: 1.5; color:#c5c6c7; }
-        .user-history-block { background:#141d26; padding:8px; border-radius:4px; margin: 8px 0; font-size:12px; border: 1px solid #233142; }
+        .user-row{background:#0b0c10;padding:15px;margin:12px 0;border-radius:5px;border-left:5px solid #45a29e;text-align:left;box-sizing:border-box;}
+        .user-meta-block { line-height: 1.6; color:#c5c6c7; word-break: break-all; }
+        .user-history-block { background:#141d26; padding:10px; border-radius:4px; margin: 10px 0; font-size:13px; border: 1px solid #233142; }
         
-        a{color:#66fcf1;text-decoration:none;} .logout-btn{background:#ff4d4d;color:#fff;width:auto;padding:5px 10px;font-size:12px;float:right;border-radius:3px;margin-left:5px;}
+        a{color:#66fcf1;text-decoration:none;} 
+        .logout-btn{background:#ff4d4d;color:#fff;padding:6px 14px;font-size:13px;font-weight:bold;border-radius:4px;text-decoration:none;border:none;cursor:pointer;}
+        .logout-btn:hover{background:#cc3333;}
         
-        /* Clean design for remove button below the text details */
-        .action-container-block { margin-top: 12px; display: flex; justify-content: flex-end; gap: 10px; }
-        .remove-btn-styled { background:#ff4d4d; color:white; padding:6px 12px; font-size:12px; font-weight:bold; cursor:pointer; border-radius:4px; text-decoration:none; text-align:center; display:inline-block; border:none; }
+        .action-container-block { margin-top: 12px; display: flex; justify-content: flex-end; }
+        .remove-btn-styled { background:#ff4d4d; color:white; padding:6px 12px; font-size:12px; font-weight:bold; cursor:pointer; border-radius:4px; text-decoration:none; border:none; }
         .remove-btn-styled:hover { background: #cc3333; }
 
-        /* White Label Secure Container - Masking all external signs */
-        .galaxy-secure-node-wrapper { background: #111a24; padding: 10px; border-radius: 8px; border: 2px solid #45a29e; margin: 12px 0; }
-        .galaxy-secure-frame-container { background: #fff; padding: 5px; border-radius: 6px; border: 1px solid #66fcf1; max-height: 520px; overflow: auto; position: relative;}
+        .galaxy-secure-node-wrapper { background: #111a24; padding: 15px; border-radius: 8px; border: 2px solid #45a29e; margin: 15px 0; box-sizing: border-box; }
+        .galaxy-secure-frame-container { background: #fff; padding: 5px; border-radius: 6px; border: 1px solid #66fcf1; max-height: 520px; overflow: auto; position: relative; margin-top: 10px;}
         .galaxy-secure-frame-container iframe { width: 100%; height: 420px; border: none; }
         
         .cpa-box{background:#111a24; padding:15px; border:1px solid #66fcf1; border-radius:5px; margin-top:15px; text-align:left;}
-        .navbar { display: flex; background: #0b0c10; border: 1px solid #45a29e; border-radius: 5px; margin-bottom: 20px; overflow: hidden; }
-        .nav-tab { flex: 1; text-align: center; padding: 12px; color: #c5c6c7; font-weight: bold; cursor: pointer; background: #0b0c10; border: none; transition: 0.3s; font-size:13px; }
+        .navbar { display: flex; background: #0b0c10; border: 1px solid #45a29e; border-radius: 5px; margin-bottom: 20px; flex-wrap: wrap; }
+        .nav-tab { flex: 1; min-width: 120px; text-align: center; padding: 12px; color: #c5c6c7; font-weight: bold; cursor: pointer; background: #0b0c10; border: none; transition: 0.3s; font-size:13px; }
         .nav-tab:hover { background: #1f2833; color: #66fcf1; }
         .nav-tab.active { background: #45a29e; color: #0b0c10; }
+        
         .dashboard-section { display: none; }
         .dashboard-section.active { display: block; }
         
-        /* Stats Cards Widgets */
-        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
-        .stat-card { background: #0b0c10; border: 1px solid #45a29e; padding: 15px; border-radius: 8px; text-align: center; }
-        .stat-card h3 { margin: 5px 0; color: #66fcf1; font-size: 22px; }
-        .stat-card p { margin: 0; color: #a5a6a7; font-size: 13px; font-weight: bold; }
+        /* 🚨 PERFECT MOBILE BOX GRID FIX (No more overlapping or screen jumping) */
+        .stats-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; width: 100%; box-sizing: border-box; }
+        .stat-card { flex: 1; min-width: calc(33.333% - 12px); background: #0b0c10; border: 1px solid #45a29e; padding: 15px; border-radius: 8px; text-align: center; box-sizing: border-box; }
+        @media (max-width: 600px) {
+            .stat-card { min-width: calc(100% - 4px); }
+            .header-block { flex-direction: column; align-items: flex-start; }
+            .header-actions { width: 100%; justify-content: space-between; }
+        }
+        
+        .stat-card h3 { margin: 5px 0; color: #66fcf1; font-size: 20px; word-wrap: break-word; }
+        .stat-card p { margin: 0; color: #a5a6a7; font-size: 11px; font-weight: bold; letter-spacing: 0.5px; }
 
         .badge-pending { background: #f0ad4e; color: black; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; }
         .badge-fail { background: #ff4d4d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; }
@@ -200,14 +205,19 @@ const htmlWrapper = (req, title, content) => {
         }
     </script>
 </head><body><div class="container">
-    <div class="lang-selector">
-        <select onchange="window.location.href='/change-lang?lang=' + this.value}">
-            <option value="en" ${lang === 'en' ? 'selected' : ''}>English</option>
-            <option value="si" ${lang === 'si' ? 'selected' : ''}>සිංහල</option>
-            <option value="ta" ${lang === 'ta' ? 'selected' : ''}>தமிழ்</option>
-        </select>
+    <div class="header-block">
+        <h2 class="header-title">${t.title}</h2>
+        <div class="header-actions">
+            <div class="lang-selector">
+                <select onchange="window.location.href='/change-lang?lang=' + this.value}">
+                    <option value="en" ${lang === 'en' ? 'selected' : ''}>English</option>
+                    <option value="si" ${lang === 'si' ? 'selected' : ''}>සිංහල</option>
+                    <option value="ta" ${lang === 'ta' ? 'selected' : ''}>தமிழ்</option>
+                </select>
+            </div>
+            <a href="/logout" class="logout-btn">${t.logout}</a>
+        </div>
     </div>
-    <h2 style="text-align:center;color:#66fcf1;margin-top:15px;">${t.title}</h2>
     ${content}
 </div></body></html>`;
 };
@@ -260,7 +270,7 @@ app.post('/register', async (req, res) => {
             return res.send("<script>alert('Username already exists!'); window.location.href='/register';</script>");
         }
         await sql(`INSERT INTO users (username, password, email, address, contact, balance_numeric, earnings_percentage) 
-                   VALUES ($1, $2, $3, $4, $5, 0.0, 100.0)`, [username, password, email, address, contact]);
+                   VALUES ($1, $2, $3, $4, $5, 0.0, 100.0)`);
         
         backupToGoogleSheet(username, email, 0.0, 0).catch(e => {}); 
         res.send("<script>alert('Registration Successful!'); window.location.href='/';</script>");
@@ -306,11 +316,7 @@ app.get('/dashboard', async (req, res) => {
             let users = []; try { users = await sql(`SELECT * FROM users WHERE username != 'admin'`); } catch(e){}
             let cpas = []; try { cpas = await sql(`SELECT * FROM cpa_configs`); } catch(e){}
             let allLogs = []; try { allLogs = await sql(`SELECT * FROM task_logs ORDER BY id DESC`); } catch(e){}
-            
-            const globalPctRow = await dbGetSetting('global_earnings_percentage');
-            let globalPct = globalPctRow ? globalPctRow.value : '100';
 
-            // Universal Search filter implementation
             let searchKeyword = req.query.search_keyword || '';
             let filteredUsers = users;
             if(searchKeyword.trim() !== '') {
@@ -323,8 +329,8 @@ app.get('/dashboard', async (req, res) => {
                 );
             }
 
-            // Task Verifications Block
-            let logsReviewHtml = `<h3>👥 Submissions Audits Panel</h3>`;
+            // Task Submissions Audit List
+            let logsReviewHtml = `<h3>📩 Worker Submissions & Task Proofs Verification</h3>`;
             let pendingSubmissions = allLogs.filter(x => x.status === 'Pending');
             if(pendingSubmissions.length === 0) {
                 logsReviewHtml += `<p style="color:#aaa;">No pending submissions to audit.</p>`;
@@ -333,21 +339,21 @@ app.get('/dashboard', async (req, res) => {
                     logsReviewHtml += `
                     <div class="user-row" style="border-left-color: #f0ad4e">
                         <strong>Worker Name:</strong> ${l.username} <br>
-                        <strong>Target Node:</strong> ${l.task_name} <br>
+                        <strong>Target Task:</strong> ${l.task_name} <br>
                         <strong>Submitted Proof Code/Data:</strong> <span style="color:#66fcf1; font-weight:bold;">${l.proof_data}</span> <br>
                         <strong>Time Sent:</strong> ${l.timestamp} <br><br>
-                        <a href="/approve-task?id=${l.id}" style="background:#45a29e; color:#000; padding:4px 10px; font-weight:bold; border-radius:4px; font-size:12px; margin-right:8px; text-decoration:none;">APPROVE & PAY</a>
-                        <a href="/reject-task?id=${l.id}" style="background:#ff4d4d; color:#fff; padding:4px 10px; font-weight:bold; border-radius:4px; font-size:12px; text-decoration:none;">REJECT PROOF</a>
+                        <a href="/approve-task?id=${l.id}" style="background:#45a29e; color:#000; padding:5px 12px; font-weight:bold; border-radius:4px; font-size:12px; margin-right:8px; text-decoration:none; display:inline-block;">APPROVE & PAY</a>
+                        <a href="/reject-task?id=${l.id}" style="background:#ff4d4d; color:#fff; padding:5px 12px; font-weight:bold; border-radius:4px; font-size:12px; text-decoration:none; display:inline-block;">REJECT PROOF</a>
                     </div>`;
                 });
             }
 
-            // Worker Details & Metrics Builder with Inner Task History Log
+            // User Details & Metrics Block
             let usersHtml = `
             <h3>👥 Workers Metrics & Registration Database</h3>
             <form method="GET" action="/dashboard" style="margin-bottom:15px;">
-                <input type="text" name="search_keyword" value="${searchKeyword}" placeholder="🔍 Search worker by username, email, phone, address..." style="width:75%; display:inline-block; padding:8px;">
-                <button type="submit" style="width:20%; display:inline-block; margin-top:0; margin-left:10px; padding:8px 0; font-size:14px;">Search</button>
+                <input type="text" name="search_keyword" value="${searchKeyword}" placeholder="🔍 Search worker by username, email, phone, address..." style="width:75%; display:inline-block; padding:10px;">
+                <button type="submit" style="width:22%; display:inline-block; margin-top:0; margin-left:10px; padding:10px 0; font-size:14px;">Search</button>
             </form>`;
 
             if(filteredUsers.length === 0) {
@@ -369,7 +375,7 @@ app.get('/dashboard', async (req, res) => {
                     usersHtml += `
                     <div class="user-row">
                         <div class="user-meta-block">
-                            <strong>👤 Username:</strong> <span style="color:#66fcf1; font-size:16px;">${u.username}</span><br>
+                            <strong>👤 Username:</strong> <span style="color:#66fcf1; font-size:16px; font-weight:bold;">${u.username}</span><br>
                             <strong>🔑 Password:</strong> ${u.password} <br>
                             <strong>📧 Email Address:</strong> ${u.email} <br>
                             <strong>📞 Contact / WhatsApp:</strong> ${u.contact || 'N/A'} <br>
@@ -389,53 +395,53 @@ app.get('/dashboard', async (req, res) => {
                 });
             }
 
-            // Admin Task Deployment & Simulation Panel
+            // 🎯 ADMIN LIVE PREVIEW SECTION (Fixed & fully implemented)
             let adminTaskSectionHtml = `
-            <h3>🎯 Deploy & Preview Active Tasks Containers</h3>
-            <p style="color:#a5a6a7; font-size:14px;">You can view and test-execute the active tasks inside your secure node matrix below.</p>`;
+            <h3>🎯 Live Tasks Checker (Admin View)</h3>
+            <p style="color:#a5a6a7; font-size:14px;">පහත දැක්වෙන්නේ ඔයා අලුතින් Upload කරපු Task, User ලට පෙනෙන ආකාරයයි. Admin ටද මෙතැනින් ඒවා ක්‍රියා කරවා පරීක්ෂා කළ හැක.</p>`;
             
             if(cpas.length === 0) {
-                adminTaskSectionHtml += `<p style="color:#ff4d4d;">No active network structures deployed.</p>`;
+                adminTaskSectionHtml += `<p style="color:#ff4d4d; text-align:center; margin:20px 0;">No active tasks uploaded structure lines open.</p>`;
             } else {
                 cpas.forEach(c => {
                     adminTaskSectionHtml += `
                     <div class="galaxy-secure-node-wrapper">
                         <h4 style="color:#66fcf1; margin:0 0 5px 0;">🌐 Active Security Node: ${c.network_name}</h4>
-                        <p style="font-size:13px; color:#45a29e; margin:0 0 10px 0;">📋 Instructions Template: ${c.instructions_en}</p>
+                        <p style="font-size:13px; color:#45a29e; margin:0 0 10px 0;">📋 Guidelines Matrix: ${c.instructions_en}</p>
                         <div class="galaxy-secure-frame-container">
                             ${c.embed_code}
                         </div>
-                        <div style="text-align:right; margin-top:8px;">
-                            <a href="/remove-cpa?id=${c.id}" style="color:#ff4d4d; font-size:12px; font-weight:bold;">[Delete Container Node]</a>
+                        <div style="text-align:right; margin-top:12px;">
+                            <a href="/remove-cpa?id=${c.id}" style="color:#ff4d4d; font-size:13px; font-weight:bold; background:rgba(255,77,77,0.1); padding:5px 10px; border-radius:4px; border:1px solid #ff4d4d;">Delete Task Unit</a>
                         </div>
                     </div>`;
                 });
             }
 
             res.send(htmlWrapper(req, 'Admin Dashboard', `
-                <h2>Welcome Chief Admin <a href="/logout" class="logout-btn">${t.logout}</a></h2>
+                <h3>Welcome Chief Admin</h3>
                 <div class="navbar">
-                    <button class="nav-tab active" onclick="switchSection('admin-panel')">⚙️ Task Setup & Controls</button>
-                    <button class="nav-tab" onclick="switchSection('task-reviews')">📩 Submissions Logs (${pendingSubmissions.length})</button>
-                    <button class="nav-tab" onclick="switchSection('user-metrics')">👥 Workers Database Metrics</button>
+                    <button class="nav-tab active" onclick="switchSection('admin-panel')">⚙️ Controls Panel</button>
+                    <button class="nav-tab" onclick="switchSection('task-reviews')">📩 Task Submissions (${pendingSubmissions.length})</button>
+                    <button class="nav-tab" onclick="switchSection('user-metrics')">👥 Worker Metrics</button>
                     <button class="nav-tab" onclick="switchSection('admin-tasks')">🎯 View & Execute Tasks</button>
                 </div>
                 
                 <div id="admin-panel" class="dashboard-section active">
-                    <h3>📢 Broadcast Notification</h3>
+                    <h3>📢 Broadcast Notifications</h3>
                     <form action="/send-notification" method="POST">
                         <select name="target_user" class="form-input"><option value="all">Broadcast to All Workers</option>${users.map(u => `<option value="${u.username}">${u.username}</option>`).join('')}</select>
-                        <input type="text" name="message" placeholder="Type administrative notification text here..." required>
-                        <button type="submit">Broadcast Message</button>
+                        <input type="text" name="message" placeholder="Message..." required>
+                        <button type="submit">Send</button>
                     </form>
                     <hr style="border-color:#45a29e; margin:20px 0;">
-                    <h3>➕ Add Native Micro-Task Container</h3>
+                    <h3>➕ Upload New Premium Task Container</h3>
                     <form action="/add-cpa" method="POST">
-                        <input type="text" name="network_name" placeholder="Container Channel Name (e.g., Galaxy Server Data System 01)" required>
-                        <textarea name="embed_code" placeholder="Paste Inner Container Execution Code or Frame URL Here" rows="3" required></textarea>
-                        <input type="text" name="instructions_en" placeholder="System Guidelines Instructions (English)" required>
-                        <input type="text" name="instructions_si" placeholder="System Guidelines Instructions (Sinhala)" required>
-                        <input type="text" name="instructions_ta" placeholder="System Guidelines Instructions (Tamil)" required>
+                        <input type="text" name="network_name" placeholder="Container Channel Name" required>
+                        <textarea name="embed_code" placeholder="Paste Task Frame URL or Execution Embed Code Here" rows="3" required></textarea>
+                        <input type="text" name="instructions_en" placeholder="Guidelines Instructions (English)" required>
+                        <input type="text" name="instructions_si" placeholder="Guidelines Instructions (Sinhala)" required>
+                        <input type="text" name="instructions_ta" placeholder="Guidelines Instructions (Tamil)" required>
                         <button type="submit">Deploy Native Task Unit</button>
                     </form>
                 </div>
@@ -445,17 +451,17 @@ app.get('/dashboard', async (req, res) => {
                 <div id="admin-tasks" class="dashboard-section">${adminTaskSectionHtml}</div>
             `));
         } else {
-            // WORKER VIEW (100% White-Labeled System)
+            // WORKER VIEW (Clean Responsive Layout Fixed)
             const userRow = await sql(`SELECT * FROM users WHERE username = $1`, [username]);
             const user = userRow[0];
             const cpas = await sql(`SELECT * FROM cpa_configs WHERE is_active = 1`);
             const logs = await sql(`SELECT * FROM task_logs WHERE username = $1`, [username]);
-            const myNotifications = await sql(`SELECT * FROM notifications WHERE target_user = 'all' OR target_user = $1`, [username]);
 
             let currentBal = user ? parseFloat(user.balance_numeric || 0) : 0.0;
             let pendingCount = logs.filter(l => l.status === 'Pending').length;
             let completedCount = logs.filter(l => l.status === 'Success').length;
 
+            // 🚨 STABLE STATS GRID (Will wrap neatly on narrow screens)
             let statsHtml = `
             <div class="stats-grid">
                 <div class="stat-card"><h3>$${currentBal.toFixed(2)}</h3><p>AVAILABLE BALANCE</p></div>
@@ -465,13 +471,13 @@ app.get('/dashboard', async (req, res) => {
 
             let cpaTasksHtml = `<h3>${t.tasks}</h3><p>${t.subText}</p>`;
             if(cpas.length === 0) {
-                cpaTasksHtml += `<p style="text-align:center; color:#ff4d4d; margin:30px 0;">No system data verification lines open right now. Refresh shortly!</p>`;
+                cpaTasksHtml += `<p style="text-align:center; color:#ff4d4d; margin:30px 0; font-weight:bold;">No system data verification lines open right now. Refresh shortly!</p>`;
             } else {
                 cpas.forEach(c => {
                     let instructions = (lang === 'si' ? c.instructions_si : (lang === 'ta' ? c.instructions_ta : c.instructions_en));
                     cpaTasksHtml += `
                     <div class="galaxy-secure-node-wrapper">
-                        <h4 style="color:#66fcf1; margin:0 0 5px 0;">🌐 Secure System Port: ${c.network_name}</h4>
+                        <h4 style="color:#66fcf1; margin:0 0 5px 0;">🌐 Core System Node: ${c.network_name}</h4>
                         <p style="font-size:14px; margin-top:0; color:#45a29e;">📋 <strong>Execution Instructions:</strong> ${instructions}</p>
                         
                         <div class="galaxy-secure-frame-container">
@@ -481,40 +487,40 @@ app.get('/dashboard', async (req, res) => {
                         <div class="proof-form">
                             <form action="/submit-task-proof" method="POST">
                                 <input type="hidden" name="task_name" value="${c.network_name}">
-                                <label style="font-size:12px; color:#45a29e;"><strong>Submit Complete Proof Code/Email Identity to Verify Payment:</strong></label>
-                                <input type="text" name="proof_data" placeholder="Type your confirmation string or verified text identifier here..." required style="width:92%; padding:8px; font-size:13px; margin:5px 0;">
-                                <button type="submit" style="padding:8px; font-size:13px; width:auto; margin-top:5px; background:#66fcf1; color:#0b0c10;">Transmit Verification Token</button>
+                                <label style="font-size:12px; color:#45a29e;"><strong>Submit Verification Tracking Code/Identity:</strong></label>
+                                <input type="text" name="proof_data" placeholder="Type your confirmation identifier string here..." required>
+                                <button type="submit" style="padding:10px; font-size:14px; background:#66fcf1; color:#0b0c10;">Transmit Verification Token</button>
                             </form>
                         </div>
                     </div>`;
                 });
             }
 
-            let logsHtml = `<h3>Activity Verifications Logs</h3>`;
+            let logsHtml = `<h3>Interaction Logs</h3>`;
             if(logs.length === 0) {
-                logsHtml += `<p>No local node interactions recorded.</p>`;
+                logsHtml += `<p>No task interaction history log tracked yet.</p>`;
             } else {
                 logs.forEach(l => {
                     let badge = `<span class="badge-pending">PENDING AUDIT</span>`;
                     if(l.status === 'Success') badge = `<span class="badge-success">CREDITED</span>`;
                     if(l.status === 'Failed') badge = `<span class="badge-fail">INVALID PROOF</span>`;
-                    logsHtml += `<div class="user-row">• <strong>${l.task_name}</strong> - ${badge} <br><small style="color:#aaa;">Tracking Token: ${l.proof_data} | Timestamp: ${l.timestamp}</small></div>`;
+                    logsHtml += `<div class="user-row">• <strong>${l.task_name}</strong> - ${badge} <br><small style="color:#aaa;">Token: ${l.proof_data} | Timestamp: ${l.timestamp}</small></div>`;
                 });
             }
 
             let withdrawHtml = `
-            <h3>💳 Local Settlement Settlement Outlets</h3>
+            <h3>💳 Local Settlements Gateway</h3>
             <p style="font-size:14px; color:#a5a6a7;">Request a standard direct balance translation payout immediately upon hitting the minimum <strong>$5.00</strong> target.</p>
             <div class="cpa-box" style="border-color:#45a29e;">
-                <form onsubmit="alert('Transaction Recorded. Galaxy Clearing House will process the balance allocation into your designated terminal within 24 business hours.'); return false;">
+                <form onsubmit="alert('Transaction Recorded. Payout is being securely audited for processing within 24 hours.'); return false;">
                     <label>Terminal Method:</label>
-                    <select class="form-input" style="width:100%; margin:8px 0;" required>
+                    <select class="form-input" required>
                         <option value="bank">Local Core Banking (BOC / Sampath / Commercial / HNB)</option>
                         <option value="mobile">Dialog eZ Cash / Mobitel mCash Interface</option>
                         <option value="crypto">Binance Pay Protocol (USDT Secure Network)</option>
                     </select>
-                    <input type="text" placeholder="Enter Full Banking Account Number, Phone Matrix, or Crypto ID Destination" required>
-                    <input type="number" step="0.01" min="5" max="${currentBal}" placeholder="Total payout translation volume ($)" required>
+                    <input type="text" placeholder="Enter Account Number, Phone Matrix, or Crypto Destination Address" required>
+                    <input type="number" step="0.01" min="5" max="${currentBal}" placeholder="Total translation volume ($)" required>
                     <button type="submit" ${currentBal < 5 ? 'disabled style="background:#555; color:#aaa; cursor:not-allowed;"' : ''}>
                         ${currentBal < 5 ? 'Threshold Limit Unreached ($5.00 minimum)' : 'Initiate Secure Settlement'}
                     </button>
@@ -522,7 +528,7 @@ app.get('/dashboard', async (req, res) => {
             </div>`;
 
             res.send(htmlWrapper(req, 'Worker Dashboard', `
-                <h2>Welcome System Worker, ${username}! <a href="/logout" class="logout-btn">${t.logout}</a></h2>
+                <h3 style="margin-top:0;">Welcome System Worker, ${username}!</h3>
                 
                 ${statsHtml}
 
@@ -551,7 +557,7 @@ app.post('/submit-task-proof', async (req, res) => {
         await sql(`INSERT INTO task_logs (username, task_name, proof_data, amount, status, timestamp) 
                    VALUES ($1, $2, $3, 0.50, 'Pending', $4)`, 
                    [req.session.user, task_name, proof_data, new Date().toLocaleString()]);
-        res.send("<script>alert('Task data transmitted to validation matrix. Processing confirmation queue.'); window.location.href='/dashboard';</script>");
+        res.send("<script>alert('Task proof transmitted to validation matrix successfully.'); window.location.href='/dashboard';</script>");
     } catch(e) { res.redirect('/dashboard'); }
 });
 
