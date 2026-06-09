@@ -12,10 +12,10 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
 
-// 🗄️ NEON DATABASE INITIALIZATION (Fixed SQL Syntax Error)
+// 🗄️ NEON DATABASE INITIALIZATION
 async function initDb() {
     try {
-        // Users Table (Removed UNIQUEIDENTIFIER syntax error)
+        // Users Table
         await sql(`CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
             username VARCHAR(50) UNIQUE NOT NULL,
@@ -27,11 +27,12 @@ async function initDb() {
             earnings_percentage NUMERIC(5,2) DEFAULT 100.0
         )`);
 
-        // Admin Account
+        // බලෙන්ම Admin Account එකක් database එකට ඇතුල් කිරීම (Force Insert on check)
         const adminCheck = await sql(`SELECT * FROM users WHERE username = 'admin'`);
-        if (adminCheck.length === 0) {
+        if (!adminCheck || adminCheck.length === 0) {
             await sql(`INSERT INTO users (username, password, email, balance_numeric, address, contact, earnings_percentage) 
                        VALUES ('admin', 'admin123', 'admin@galaxy.com', 0.0, 'Headquarters', '0000000000', 100.0)`);
+            console.log("Admin account forced created!");
         }
 
         // Task Logs Table
@@ -78,7 +79,7 @@ async function initDb() {
     }
 }
 
-// ⚠️ Middleware to ensure DB tables exist before handling requests safely on Vercel
+// Middleware to ensure DB tables exist before handling requests
 let dbInitialized = false;
 app.use(async (req, res, next) => {
     if (!dbInitialized) {
