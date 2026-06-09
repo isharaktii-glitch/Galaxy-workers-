@@ -90,13 +90,13 @@ app.use(async (req, res, next) => {
 
 async function dbGetSetting(key) {
     try {
-        const rows = await sql(`SELECT value FROM system_settings WHERE key = $1`, [key]);
+        const rows = await sql(`SELECT value FROM system_settings WHERE key = ${key}`);
         return rows.length > 0 ? { key, value: rows[0].value } : null;
     } catch (e) { return null; }
 }
 
 async function backupToGoogleSheet(username, email, balance, taskCount) {
-    const row = await dbGetSetting('google_sheet_config');
+    const row = await dbGetSetting("'google_sheet_config'");
     if (!row || !row.value) return; 
     try {
         const config = JSON.parse(row.value); 
@@ -138,7 +138,7 @@ const translations = {
         user: "பயனர் பெயர் (Username)", pass: "கடவுச்சொல் (Password)", email: "மின்னஞ்சல் முகவரி", addr: "முழு முகவரி", phone: "தொலைபேசி எண்",
         btnLog: "உள்நுழைக", btnReg: "பதிவு செய்க", noAcc: "கணக்கு இல்லையா?", regHere: "இங்கே பதிவு செய்யவும்",
         backLog: "மீண்டும் உள்நுழைய", welcome: "வரவேற்கிறோம்", total: "உங்கள் மொத்த வருவாய்", tasks: "கிடைக்கக்கூடிய பணிகள் 👇",
-        subText: "கீழே உள்ள பணிகளை முடிக்கவும். உங்கள் சான்றுகளைச் சமர்ப்பிக்கவும்.", logout: "வெளியேறு (Logout)",
+        subText: "கீழே உள்ள பணிகளை முடிக்கவும். உங்கள் சான்றுகளையும் சமர்ப்பிக்கவும்.", logout: "வெளியேறு (Logout)",
         forgot: "கடவுச்சொல் மறந்துவிட்டதா?", recoverTitle: "கடவுச்சொல்லை மீட்டெடுக்கவும்", btnRecover: "மீட்டெடுப்போம்",
         cpaTitle: "🔗 CPA நெட்வொர்க் இணைப்பு அமைப்புகள்", taskInstr: "பணி வழிமுறைகள்"
     }
@@ -186,7 +186,6 @@ const htmlWrapper = (req, title, content) => {
         .dashboard-section { display: none; }
         .dashboard-section.active { display: block; }
         
-        /* 🚨 STABLE BOX GRID FIX (Prevents overflowing layout tabs) */
         .stats-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; width: 100%; box-sizing: border-box; }
         .stat-card { flex: 1; min-width: calc(33.333% - 12px); background: #0b0c10; border: 1px solid #45a29e; padding: 15px; border-radius: 8px; text-align: center; box-sizing: border-box; }
         @media (max-width: 600px) {
@@ -269,17 +268,19 @@ app.get('/register', (req, res) => {
     `));
 });
 
+// FIXED: Using Neon serverless native template literal injection syntax for queries
 app.post('/register', async (req, res) => {
     const { username, password, email, address, contact } = req.body;
     try {
-        const exists = await sql(`SELECT * FROM users WHERE LOWER(username) = $1`, [username.toLowerCase()]);
+        const lowerUser = username.toLowerCase();
+        const exists = await sql(`SELECT * FROM users WHERE LOWER(username) = ${lowerUser}`);
         if (exists && exists.length > 0) {
             return res.send("<script>alert('Username already exists!'); window.location.href='/register';</script>");
         }
         
-        // Securely inserts the complete profile schema directly into database
+        // Neon native prepared template execution fix
         await sql(`INSERT INTO users (username, password, email, address, contact, balance_numeric, earnings_percentage) 
-                   VALUES ($1, $2, $3, $4, $5, 0.0, 100.0)`);
+                   VALUES (${username}, ${password}, ${email}, ${address}, ${contact}, 0.0, 100.0)`);
         
         backupToGoogleSheet(username, email, 0.0, 0).catch(e => {}); 
         res.send("<script>alert('Registration Successful!'); window.location.href='/';</script>");
@@ -296,7 +297,7 @@ app.post('/login', async (req, res) => {
         return res.redirect('/dashboard');
     }
     try {
-        const users = await sql(`SELECT * FROM users WHERE username = $1 AND password = $2`, [username, password]);
+        const users = await sql(`SELECT * FROM users WHERE username = ${username} AND password = ${password}`);
         if (users && users.length > 0) {
             req.session.user = users[0].username;
             res.redirect('/dashboard');
@@ -462,10 +463,10 @@ app.get('/dashboard', async (req, res) => {
             `));
         } else {
             // WORKER VIEW
-            const userRow = await sql(`SELECT * FROM users WHERE username = $1`, [username]);
+            const userRow = await sql(`SELECT * FROM users WHERE username = ${username}`);
             const user = userRow[0];
             const cpas = await sql(`SELECT * FROM cpa_configs WHERE is_active = 1`);
-            const logs = await sql(`SELECT * FROM task_logs WHERE username = $1`, [username]);
+            const logs = await sql(`SELECT * FROM task_logs WHERE username = ${username}`);
 
             let currentBal = user ? parseFloat(user.balance_numeric || 0) : 0.0;
             let pendingCount = logs.filter(l => l.status === 'Pending').length;
@@ -563,9 +564,10 @@ app.post('/submit-task-proof', async (req, res) => {
     if (!req.session.user) return res.redirect('/');
     const { task_name, proof_data } = req.body;
     try {
+        const user = req.session.user;
+        const timeStr = new Date().toLocaleString();
         await sql(`INSERT INTO task_logs (username, task_name, proof_data, amount, status, timestamp) 
-                   VALUES ($1, $2, $3, 0.50, 'Pending', $4)`, 
-                   [req.session.user, task_name, proof_data, new Date().toLocaleString()]);
+                   VALUES (${user}, ${task_name}, ${proof_data}, 0.50, 'Pending', ${timeStr})`);
         res.send("<script>alert('Task proof transmitted to validation matrix successfully.'); window.location.href='/dashboard';</script>");
     } catch(e) { res.redirect('/dashboard'); }
 });
@@ -574,11 +576,11 @@ app.get('/approve-task', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const logId = parseInt(req.query.id);
     try {
-        const logRow = await sql(`SELECT * FROM task_logs WHERE id = $1`, [logId]);
+        const logRow = await sql(`SELECT * FROM task_logs WHERE id = ${logId}`);
         if(logRow.length > 0 && logRow[0].status === 'Pending') {
             const task = logRow[0];
-            await sql(`UPDATE task_logs SET status = 'Success' WHERE id = $1`, [logId]);
-            await sql(`UPDATE users SET balance_numeric = balance_numeric + $1 WHERE username = $2`, [task.amount, task.username]);
+            await sql(`UPDATE task_logs SET status = 'Success' WHERE id = ${logId}`);
+            await sql(`UPDATE users SET balance_numeric = balance_numeric + ${task.amount} WHERE username = ${task.username}`);
         }
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
@@ -586,25 +588,28 @@ app.get('/approve-task', async (req, res) => {
 
 app.get('/reject-task', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
+    const logId = parseInt(req.query.id);
     try {
-        await sql(`UPDATE task_logs SET status = 'Failed' WHERE id = $1`, [parseInt(req.query.id)]);
+        await sql(`UPDATE task_logs SET status = 'Failed' WHERE id = ${logId}`);
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
 });
 
 app.post('/send-notification', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
+    const { target_user, message } = req.body;
     try {
-        await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES ($1, $2, $3)`, 
-                   [req.body.target_user, req.body.message, new Date().toISOString()]);
+        const timeStr = new Date().toISOString();
+        await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES (${target_user}, ${message}, ${timeStr})`);
         res.send("<script>alert('Notification Broadcasted!'); window.location.href='/dashboard';</script>");
     } catch(e) { res.redirect('/dashboard'); }
 });
 
 app.get('/remove-user', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
+    const userId = parseInt(req.query.id);
     try {
-        await sql(`DELETE FROM users WHERE id = $1`, [parseInt(req.query.id)]);
+        await sql(`DELETE FROM users WHERE id = ${userId}`);
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
 });
@@ -614,15 +619,16 @@ app.post('/add-cpa', async (req, res) => {
     const { network_name, embed_code, instructions_en, instructions_si, instructions_ta } = req.body;
     try {
         await sql(`INSERT INTO cpa_configs (network_name, embed_code, instructions_en, instructions_si, instructions_ta, is_active) 
-                   VALUES ($1, $2, $3, $4, $5, 1)`, [network_name, embed_code, instructions_en, instructions_si, instructions_ta]);
+                   VALUES (${network_name}, ${embed_code}, ${instructions_en}, ${instructions_si}, ${instructions_ta}, 1)`);
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
 });
 
 app.get('/remove-cpa', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
+    const cpaId = parseInt(req.query.id);
     try {
-        await sql(`DELETE FROM cpa_configs WHERE id = $1`, [parseInt(req.query.id)]);
+        await sql(`DELETE FROM cpa_configs WHERE id = ${cpaId}`);
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
 });
