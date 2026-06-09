@@ -90,13 +90,13 @@ app.use(async (req, res, next) => {
 
 async function dbGetSetting(key) {
     try {
-        const rows = await sql(`SELECT value FROM system_settings WHERE key = ${key}`);
+        const rows = await sql(`SELECT value FROM system_settings WHERE key = $1`, [key]);
         return rows.length > 0 ? { key, value: rows[0].value } : null;
     } catch (e) { return null; }
 }
 
 async function backupToGoogleSheet(username, email, balance, taskCount) {
-    const row = await dbGetSetting("'google_sheet_config'");
+    const row = await dbGetSetting('google_sheet_config');
     if (!row || !row.value) return; 
     try {
         const config = JSON.parse(row.value); 
@@ -268,19 +268,18 @@ app.get('/register', (req, res) => {
     `));
 });
 
-// FIXED: Using Neon serverless native template literal injection syntax for queries
+// FIXED Neon Array Param Binding to completely resolve syntax error bugs
 app.post('/register', async (req, res) => {
     const { username, password, email, address, contact } = req.body;
     try {
         const lowerUser = username.toLowerCase();
-        const exists = await sql(`SELECT * FROM users WHERE LOWER(username) = ${lowerUser}`);
+        const exists = await sql(`SELECT * FROM users WHERE LOWER(username) = $1`, [lowerUser]);
         if (exists && exists.length > 0) {
             return res.send("<script>alert('Username already exists!'); window.location.href='/register';</script>");
         }
         
-        // Neon native prepared template execution fix
         await sql(`INSERT INTO users (username, password, email, address, contact, balance_numeric, earnings_percentage) 
-                   VALUES (${username}, ${password}, ${email}, ${address}, ${contact}, 0.0, 100.0)`);
+                   VALUES ($1, $2, $3, $4, $5, 0.0, 100.0)`, [username, password, email, address, contact]);
         
         backupToGoogleSheet(username, email, 0.0, 0).catch(e => {}); 
         res.send("<script>alert('Registration Successful!'); window.location.href='/';</script>");
@@ -297,7 +296,7 @@ app.post('/login', async (req, res) => {
         return res.redirect('/dashboard');
     }
     try {
-        const users = await sql(`SELECT * FROM users WHERE username = ${username} AND password = ${password}`);
+        const users = await sql(`SELECT * FROM users WHERE username = $1 AND password = $2`, [username, password]);
         if (users && users.length > 0) {
             req.session.user = users[0].username;
             res.redirect('/dashboard');
@@ -323,7 +322,6 @@ app.get('/dashboard', async (req, res) => {
 
     try {
         if (username === 'admin') {
-            // ADMIN VIEW
             let users = []; try { users = await sql(`SELECT * FROM users WHERE username != 'admin'`); } catch(e){}
             let cpas = []; try { cpas = await sql(`SELECT * FROM cpa_configs`); } catch(e){}
             let allLogs = []; try { allLogs = await sql(`SELECT * FROM task_logs ORDER BY id DESC`); } catch(e){}
@@ -340,7 +338,6 @@ app.get('/dashboard', async (req, res) => {
                 );
             }
 
-            // Task Submissions Audit List
             let logsReviewHtml = `<h3>📩 Worker Submissions & Task Proofs Verification</h3>`;
             let pendingSubmissions = allLogs.filter(x => x.status === 'Pending');
             if(pendingSubmissions.length === 0) {
@@ -359,7 +356,6 @@ app.get('/dashboard', async (req, res) => {
                 });
             }
 
-            // User Details & Metrics Block
             let usersHtml = `
             <h3>👥 Workers Metrics & Registration Database</h3>
             <form method="GET" action="/dashboard" style="margin-bottom:15px;">
@@ -406,10 +402,9 @@ app.get('/dashboard', async (req, res) => {
                 });
             }
 
-            // ADMIN LIVE PREVIEW SECTION
             let adminTaskSectionHtml = `
             <h3>🎯 Live Tasks Checker (Admin View)</h3>
-            <p style="color:#a5a6a7; font-size:14px;">පහත දැක්වෙන්නේ ඔයා අලුතින් Upload කරපු Task, User ලට පෙනෙන ආකාරයයි. Admin ටද මෙතැනින් ඒවා ක්‍රියා කරවා පරීක්ෂා කළ හැක.</p>`;
+            <p style="color:#a5a6a7; font-size:14px;">පහත දැක්වෙන්නේ ඔයා අලුතින් Upload කරපු Task, User ලට පෙනෙන ආකාරයයි.</p>`;
             
             if(cpas.length === 0) {
                 adminTaskSectionHtml += `<p style="color:#ff4d4d; text-align:center; margin:20px 0;">No active tasks uploaded structure lines open.</p>`;
@@ -418,7 +413,6 @@ app.get('/dashboard', async (req, res) => {
                     adminTaskSectionHtml += `
                     <div class="galaxy-secure-node-wrapper">
                         <h4 style="color:#66fcf1; margin:0 0 5px 0;">🌐 Active Security Node: ${c.network_name}</h4>
-                        <p style="font-size:13px; color:#45a29e; margin:0 0 10px 0;">📋 Guidelines Matrix: ${c.instructions_en}</p>
                         <div class="galaxy-secure-frame-container">
                             ${c.embed_code}
                         </div>
@@ -463,10 +457,10 @@ app.get('/dashboard', async (req, res) => {
             `));
         } else {
             // WORKER VIEW
-            const userRow = await sql(`SELECT * FROM users WHERE username = ${username}`);
+            const userRow = await sql(`SELECT * FROM users WHERE username = $1`, [username]);
             const user = userRow[0];
             const cpas = await sql(`SELECT * FROM cpa_configs WHERE is_active = 1`);
-            const logs = await sql(`SELECT * FROM task_logs WHERE username = ${username}`);
+            const logs = await sql(`SELECT * FROM task_logs WHERE username = $1`, [username]);
 
             let currentBal = user ? parseFloat(user.balance_numeric || 0) : 0.0;
             let pendingCount = logs.filter(l => l.status === 'Pending').length;
@@ -567,7 +561,7 @@ app.post('/submit-task-proof', async (req, res) => {
         const user = req.session.user;
         const timeStr = new Date().toLocaleString();
         await sql(`INSERT INTO task_logs (username, task_name, proof_data, amount, status, timestamp) 
-                   VALUES (${user}, ${task_name}, ${proof_data}, 0.50, 'Pending', ${timeStr})`);
+                   VALUES ($1, $2, $3, 0.50, 'Pending', $4)`, [user, task_name, proof_data, timeStr]);
         res.send("<script>alert('Task proof transmitted to validation matrix successfully.'); window.location.href='/dashboard';</script>");
     } catch(e) { res.redirect('/dashboard'); }
 });
@@ -576,11 +570,11 @@ app.get('/approve-task', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const logId = parseInt(req.query.id);
     try {
-        const logRow = await sql(`SELECT * FROM task_logs WHERE id = ${logId}`);
+        const logRow = await sql(`SELECT * FROM task_logs WHERE id = $1`, [logId]);
         if(logRow.length > 0 && logRow[0].status === 'Pending') {
             const task = logRow[0];
-            await sql(`UPDATE task_logs SET status = 'Success' WHERE id = ${logId}`);
-            await sql(`UPDATE users SET balance_numeric = balance_numeric + ${task.amount} WHERE username = ${task.username}`);
+            await sql(`UPDATE task_logs SET status = 'Success' WHERE id = $1`, [logId]);
+            await sql(`UPDATE users SET balance_numeric = balance_numeric + $1 WHERE username = $2`, [task.amount, task.username]);
         }
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
@@ -590,7 +584,7 @@ app.get('/reject-task', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const logId = parseInt(req.query.id);
     try {
-        await sql(`UPDATE task_logs SET status = 'Failed' WHERE id = ${logId}`);
+        await sql(`UPDATE task_logs SET status = 'Failed' WHERE id = $1`, [logId]);
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
 });
@@ -600,7 +594,7 @@ app.post('/send-notification', async (req, res) => {
     const { target_user, message } = req.body;
     try {
         const timeStr = new Date().toISOString();
-        await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES (${target_user}, ${message}, ${timeStr})`);
+        await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES ($1, $2, $3)`, [target_user, message, timeStr]);
         res.send("<script>alert('Notification Broadcasted!'); window.location.href='/dashboard';</script>");
     } catch(e) { res.redirect('/dashboard'); }
 });
@@ -609,7 +603,7 @@ app.get('/remove-user', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const userId = parseInt(req.query.id);
     try {
-        await sql(`DELETE FROM users WHERE id = ${userId}`);
+        await sql(`DELETE FROM users WHERE id = $1`, [userId]);
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
 });
@@ -619,7 +613,7 @@ app.post('/add-cpa', async (req, res) => {
     const { network_name, embed_code, instructions_en, instructions_si, instructions_ta } = req.body;
     try {
         await sql(`INSERT INTO cpa_configs (network_name, embed_code, instructions_en, instructions_si, instructions_ta, is_active) 
-                   VALUES (${network_name}, ${embed_code}, ${instructions_en}, ${instructions_si}, ${instructions_ta}, 1)`);
+                   VALUES ($1, $2, $3, $4, $5, 1)`, [network_name, embed_code, instructions_en, instructions_si, instructions_ta]);
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
 });
@@ -628,7 +622,7 @@ app.get('/remove-cpa', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const cpaId = parseInt(req.query.id);
     try {
-        await sql(`DELETE FROM cpa_configs WHERE id = ${cpaId}`);
+        await sql(`DELETE FROM cpa_configs WHERE id = $1`, [cpaId]);
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
 });
