@@ -1,15 +1,16 @@
 {
-  "name": "galaxy-workers",
+  "name": "galaxy-workers-network",
   "version": "1.0.0",
-  "main": "server.js",
+  "description": "Galaxy Workers Network Platform with Neon Database",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node index.js"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^0.9.4",
+    "body-parser": "^1.20.2",
     "express": "^4.19.2",
     "express-session": "^1.18.0",
-    "body-parser": "^1.20.2",
-    "googleapis": "^126.0.0",
-    "pg": "^8.11.0"
+    "googleapis": "^140.0.0"
   }
 }
