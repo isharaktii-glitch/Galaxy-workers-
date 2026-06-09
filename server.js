@@ -65,7 +65,7 @@ async function initDb() {
             timestamp VARCHAR(50) NOT NULL
         )`);
 
-        console.log("Neon Database Tables Initialized Successfully!");
+        console.log("Neon Database Tables Initialized/Reset Successfully!");
     } catch (err) {
         console.error("Database Init Error:", err);
     }
@@ -83,8 +83,12 @@ app.use(async (req, res, next) => {
 
 // Settings Helper Functions
 async function dbGetSetting(key) {
-    const rows = await sql(`SELECT value FROM system_settings WHERE key = $1`, [key]);
-    return rows.length > 0 ? { key, value: rows[0].value } : null;
+    try {
+        const rows = await sql(`SELECT value FROM system_settings WHERE key = $1`, [key]);
+        return rows.length > 0 ? { key, value: rows[0].value } : null;
+    } catch (e) {
+        return null;
+    }
 }
 
 async function dbSaveSetting(key, value) {
@@ -231,30 +235,35 @@ app.get('/register', (req, res) => {
     `));
 });
 
-// REGISTER POST ACTION
+// REGISTER POST ACTION (Safe Insert Fix)
 app.post('/register', async (req, res) => {
     const { username, password, email, address, contact } = req.body;
     try {
+        // Username එක දැනටමත් තියෙනවද බැලීම
         const exists = await sql(`SELECT * FROM users WHERE LOWER(username) = $1`, [username.toLowerCase()]);
-        if (exists.length > 0) {
+        if (exists && exists.length > 0) {
             return res.send("<script>alert('Username already exists!'); window.location.href='/register';</script>");
         }
+        
+        // Database එකට ලස්සනට දත්ත දැමීම
         await sql(`INSERT INTO users (username, password, email, address, contact, balance_numeric, earnings_percentage) 
                    VALUES ($1, $2, $3, $4, $5, 0.0, 100.0)`, [username, password, email, address, contact]);
         
-        await backupToGoogleSheet(username, email, 0.0, 0); 
+        // Google sheet එකට background එකේ backup කිරීම (Error ආවත් Register එක නවතින්නේ නැත)
+        backupToGoogleSheet(username, email, 0.0, 0).catch(e => console.error(e)); 
+        
         res.send("<script>alert('Registration Successful!'); window.location.href='/';</script>");
     } catch (err) {
-        console.error(err);
-        res.send(`<script>alert('Error registering user.'); window.location.href='/register';</script>`);
+        console.error("Registration Error: ", err);
+        res.send(`<script>alert('Error registering user: ${err.message || "DB Error"}'); window.location.href='/register';</script>`);
     }
 });
 
-// 🔒 LOGIN POST ACTION (Fixed and Forced Admin Bypass)
+// LOGIN POST ACTION
 app.post('/login', async (req, res) => {
     const { username, password } = req.body;
     
-    // ⚡ Force Admin Check (Bypasses DB if details match hardcoded values)
+    // Admin Forced Bypass
     if (username === 'admin' && password === 'admin123') {
         req.session.user = 'admin';
         return res.redirect('/dashboard');
@@ -262,14 +271,14 @@ app.post('/login', async (req, res) => {
 
     try {
         const users = await sql(`SELECT * FROM users WHERE username = $1 AND password = $2`, [username, password]);
-        if (users.length > 0) {
+        if (users && users.length > 0) {
             req.session.user = users[0].username;
             res.redirect('/dashboard');
         } else {
             res.send("<script>alert('Invalid Credentials'); window.location.href='/';</script>");
         }
     } catch (err) {
-        res.send("<script>alert('Database Error'); window.location.href='/';</script>");
+        res.send("<script>alert('Database Login Error'); window.location.href='/';</script>");
     }
 });
 
@@ -290,7 +299,7 @@ app.post('/forgot-password', async (req, res) => {
     const { username } = req.body;
     try {
         const users = await sql(`SELECT password FROM users WHERE username = $1`, [username]);
-        if (users.length > 0) {
+        if (users && users.length > 0) {
             res.send(htmlWrapper(req, 'Recovered', `<h3>Your Password is: <span style="color:#66fcf1;">${users[0].password}</span></h3><p><a href="/">Back to Login</a></p>`));
         } else {
             res.send("<script>alert('User not found!'); window.location.href='/forgot-password';</script>");
@@ -315,14 +324,18 @@ app.get('/dashboard', async (req, res) => {
 
     try {
         if (username === 'admin') {
-            const users = await sql(`SELECT * FROM users WHERE username != 'admin'`);
-            const cpas = await sql(`SELECT * FROM cpa_configs`);
+            let users = [];
+            try { users = await sql(`SELECT * FROM users WHERE username != 'admin'`); } catch(e){}
+            
+            let cpas = [];
+            try { cpas = await sql(`SELECT * FROM cpa_configs`); } catch(e){}
+            
             const globalPctRow = await dbGetSetting('global_earnings_percentage');
             let globalPct = globalPctRow ? globalPctRow.value : '100';
 
             let searchUser = req.query.search_user || '';
             let filteredUsers = users;
-            if(searchUser) {
+            if(searchUser && users.length > 0) {
                 filteredUsers = users.filter(u => u.username.toLowerCase().includes(searchUser.toLowerCase()));
             }
 
@@ -333,22 +346,26 @@ app.get('/dashboard', async (req, res) => {
             </form>
             <h3>Registered Workers Details & Earnings Metric</h3>`;
             
-            filteredUsers.forEach(u => {
-                let userBal = u.balance_numeric ? parseFloat(u.balance_numeric) : 0.0;
-                usersHtml += `
-                <div class="user-row">
-                    <strong>User:</strong> ${u.username} | <strong>Pass:</strong> ${u.password} | <strong>Email:</strong> ${u.email}<br>
-                    <strong>Contact:</strong> ${u.contact} | <strong>Address:</strong> ${u.address}<br>
-                    <strong>Current Balance:</strong> $${userBal.toFixed(2)}<br>
-                    <form action="/update-user-percentage" method="POST" style="margin:5px 0; display:inline-block;">
-                        <input type="hidden" name="username" value="${u.username}">
-                        <label>Custom Pay: </label>
-                        <input type="number" name="percentage" value="${u.earnings_percentage || 100}" style="width:60px; padding:2px; margin:0;"> % 
-                        <button type="submit" style="width:auto; padding:3px 8px; font-size:11px; display:inline-block; margin:0;">Set</button>
-                    </form>
-                    <a href="/remove-user?id=${u.id}" class="remove-btn" onclick="return confirm('Are you sure you want to remove this user?')">REMOVE USER</a>
-                </div>`;
-            });
+            if(filteredUsers.length === 0) {
+                usersHtml += `<p style="color:#ff4d4d;">No workers registered yet.</p>`;
+            } else {
+                filteredUsers.forEach(u => {
+                    let userBal = u.balance_numeric ? parseFloat(u.balance_numeric) : 0.0;
+                    usersHtml += `
+                    <div class="user-row">
+                        <strong>User:</strong> ${u.username} | <strong>Pass:</strong> ${u.password} | <strong>Email:</strong> ${u.email}<br>
+                        <strong>Contact:</strong> ${u.contact} | <strong>Address:</strong> ${u.address}<br>
+                        <strong>Current Balance:</strong> $${userBal.toFixed(2)}<br>
+                        <form action="/update-user-percentage" method="POST" style="margin:5px 0; display:inline-block;">
+                            <input type="hidden" name="username" value="${u.username}">
+                            <label>Custom Pay: </label>
+                            <input type="number" name="percentage" value="${u.earnings_percentage || 100}" style="width:60px; padding:2px; margin:0;"> % 
+                            <button type="submit" style="width:auto; padding:3px 8px; font-size:11px; display:inline-block; margin:0;">Set</button>
+                        </form>
+                        <a href="/remove-user?id=${u.id}" class="remove-btn" onclick="return confirm('Are you sure you want to remove this user?')">REMOVE USER</a>
+                    </div>`;
+                });
+            }
 
             let cpaHtml = `<h3>${t.cpaTitle}</h3>`;
             cpas.forEach(c => {
@@ -466,7 +483,7 @@ app.get('/dashboard', async (req, res) => {
                 </div>
                 <div id="worker-logs" class="dashboard-section">${logsHtml}</div>
             `));
-            if(user) await backupToGoogleSheet(user.username, user.email, currentBal, logs.length);
+            if(user) await backupToGoogleSheet(user.username, user.email, currentBal, logs.length).catch(e=>'');
         }
     } catch (err) {
         console.error(err);
@@ -506,14 +523,6 @@ app.post('/update-global-percentage', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     try {
         await dbSaveSetting('global_earnings_percentage', req.body.global_percentage);
-        res.redirect('/dashboard');
-    } catch(err) { res.redirect('/dashboard'); }
-});
-
-app.post('/save-sheet-config', async (req, res) => {
-    if (req.session.user !== 'admin') return res.redirect('/');
-    try {
-        await dbSaveSetting('google_sheet_config', req.body.sheet_config);
         res.redirect('/dashboard');
     } catch(err) { res.redirect('/dashboard'); }
 });
