@@ -121,6 +121,60 @@ const htmlWrapper = (req, title, content) => {
         .notification-item { border-bottom: 1px solid #333; padding: 6px 0; font-size: 14px; color: #fff; }
         .notification-item.personal { color: #66fcf1; border-left: 3px solid #66fcf1; padding-left: 5px; }
         .notification-item.fail { color: #ff4d4d; border-left: 3px solid #ff4d4d; padding-left: 5px; }
+            </style>
+</head>
+<body>${content}</body>
+</html>`;
+};
+
+
+const htmlWrapper = (req, title, content) => {
+    const lang = req.session.lang || 'en';
+    const t = translations[lang];
+    return `<!DOCTYPE html><html lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title>
+    <style>
+        body{background:#0b0c10;color:#c5c6c7;font-family:sans-serif;padding:20px;margin:0;} 
+        .container{max-width:850px;margin:30px auto;background:#1f2833;padding:25px;border-radius:10px;border:1px solid #45a29e;box-shadow: 0px 0px 15px rgba(69, 162, 158, 0.2);position:relative;}
+        .lang-selector { position: absolute; top: 15px; right: 15px; }
+        .lang-selector select { background: #0b0c10; color: #66fcf1; border: 1px solid #45a29e; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        input, textarea, select.form-input {width:95%;padding:10px;margin:8px 0;border-radius:5px;border:1px solid #45a29e;background:#0b0c10;color:#fff;} 
+        button{width:100%;padding:12px;background:#45a29e;border:none;color:#0b0c10;font-weight:bold;font-size:16px;border-radius:5px;cursor:pointer;margin-top:10px;}
+        button:hover{background:#66fcf1;}
+        .user-row{background:#0b0c10;padding:12px;margin:10px 0;border-radius:5px;border-left:5px solid #45a29e;text-align:left;position:relative;}
+        a{color:#66fcf1;text-decoration:none;} .logout-btn{background:#ff4d4d;color:#fff;width:auto;padding:5px 10px;font-size:12px;float:right;border-radius:3px;margin-left:5px;}
+        .remove-btn{background:#ff4d4d;color:white;border:none;padding:5px 10px;font-size:11px;cursor:pointer;border-radius:3px;float:right;margin-top:-20px;}
+        iframe { width: 100%; height: 600px; border: none; border-radius: 8px; margin-top: 15px; }
+        .cpa-box{background:#111a24; padding:15px; border:1px solid #66fcf1; border-radius:5px; margin-top:15px; text-align:left;}
+        .navbar { display: flex; background: #0b0c10; border: 1px solid #45a29e; border-radius: 5px; margin-bottom: 20px; overflow: hidden; }
+        .nav-tab { flex: 1; text-align: center; padding: 12px; color: #c5c6c7; font-weight: bold; cursor: pointer; background: #0b0c10; border: none; transition: 0.3s; }
+        .nav-tab:hover { background: #1f2833; color: #66fcf1; }
+        .nav-tab.active { background: #45a29e; color: #0b0c10; }
+        .dashboard-section { display: none; }
+        .dashboard-section.active { display: block; }
+        .badge-fail { background: #ff4d4d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+        .badge-success { background: #45a29e; color: #0b0c10; padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+    </style>
+    <script>
+        function switchSection(sectionId) {
+            document.querySelectorAll('.dashboard-section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            document.getElementById(sectionId).classList.add('active');
+            event.target.classList.add('active');
+        }
+    </script>
+</head><body><div class="container">
+    <div class="lang-selector">
+        <select onchange="window.location.href='/change-lang?lang=' + this.value}">
+            <option value="en" ${lang === 'en' ? 'selected' : ''}>English</option>
+            <option value="si" ${lang === 'si' ? 'selected' : ''}>සිංහල</option>
+            <option value="ta" ${lang === 'ta' ? 'selected' : ''}>தமிழ்</option>
+        </select>
+    </div>
+    <h2 style="text-align:center;color:#66fcf1;margin-top:15px;">${t.title}</h2>
+    ${content}
+</div></body></html>`;
+};
+
         .badge-fail { background: #ff4d4d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; }
         .badge-success { background: #45a29e; color: #0b0c10; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; }
     </style>
