@@ -27,14 +27,6 @@ async function initDb() {
             earnings_percentage NUMERIC(5,2) DEFAULT 100.0
         )`);
 
-        // බලෙන්ම Admin Account එකක් database එකට ඇතුල් කිරීම (Force Insert on check)
-        const adminCheck = await sql(`SELECT * FROM users WHERE username = 'admin'`);
-        if (!adminCheck || adminCheck.length === 0) {
-            await sql(`INSERT INTO users (username, password, email, balance_numeric, address, contact, earnings_percentage) 
-                       VALUES ('admin', 'admin123', 'admin@galaxy.com', 0.0, 'Headquarters', '0000000000', 100.0)`);
-            console.log("Admin account forced created!");
-        }
-
         // Task Logs Table
         await sql(`CREATE TABLE IF NOT EXISTS task_logs (
             id SERIAL PRIMARY KEY,
@@ -258,9 +250,16 @@ app.post('/register', async (req, res) => {
     }
 });
 
-// LOGIN POST ACTION
+// 🔒 LOGIN POST ACTION (Fixed and Forced Admin Bypass)
 app.post('/login', async (req, res) => {
     const { username, password } = req.body;
+    
+    // ⚡ Force Admin Check (Bypasses DB if details match hardcoded values)
+    if (username === 'admin' && password === 'admin123') {
+        req.session.user = 'admin';
+        return res.redirect('/dashboard');
+    }
+
     try {
         const users = await sql(`SELECT * FROM users WHERE username = $1 AND password = $2`, [username, password]);
         if (users.length > 0) {
@@ -452,7 +451,7 @@ app.get('/dashboard', async (req, res) => {
                 cpaTasksHtml += `<div class="cpa-box"><h4>🎯 ${c.network_name}</h4><p>${instructions}</p>${c.embed_code}</div>`;
             });
 
-            let currentBal = user.balance_numeric ? parseFloat(user.balance_numeric) : 0.0;
+            let currentBal = user ? (user.balance_numeric ? parseFloat(user.balance_numeric) : 0.0) : 0.0;
 
             res.send(htmlWrapper(req, 'Worker Dashboard', `
                 <h2>${t.welcome}, ${username}! <a href="/logout" class="logout-btn">${t.logout}</a></h2>
@@ -467,7 +466,7 @@ app.get('/dashboard', async (req, res) => {
                 </div>
                 <div id="worker-logs" class="dashboard-section">${logsHtml}</div>
             `));
-            await backupToGoogleSheet(user.username, user.email, currentBal, logs.length);
+            if(user) await backupToGoogleSheet(user.username, user.email, currentBal, logs.length);
         }
     } catch (err) {
         console.error(err);
