@@ -4,8 +4,7 @@ const bodyParser = require('body-parser');
 const { google } = require('googleapis');
 const { neon } = require('@neondatabase/serverless');
 
-// 🚨 වැදගත්: ඔයාගේ Neon Connection String එක Environment Variable (DATABASE_URL) එකක් විදිහට Vercel වල දාන්න.
-// නැත්නම් පහත ආකාරයට සෘජුවම ලබා දිය හැක: neon('postgresql://user:pass@ep-smth...neon.tech/neondb')
+// Neon Database Connection
 const sql = neon(process.env.DATABASE_URL);
 
 const app = express();
@@ -13,23 +12,22 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUninitialized: true }));
 
-// 🗄️ NEON DATABASE INITIALIZATION (Tables ස්වයංක්‍රීයව සෑදීම)
+// 🗄️ NEON DATABASE INITIALIZATION (Fixed SQL Syntax Error)
 async function initDb() {
     try {
-        // Users Table
+        // Users Table (Removed UNIQUEIDENTIFIER syntax error)
         await sql(`CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
             username VARCHAR(50) UNIQUE NOT NULL,
             password VARCHAR(50) NOT NULL,
             email VARCHAR(100) NOT NULL,
-            balance UNIQUEIDENTIFIER DEFAULT 0.0,
-            balance_numeric NUMERIC(10,2) DEFAULT 0.0,
             address TEXT,
             contact VARCHAR(20),
+            balance_numeric NUMERIC(10,2) DEFAULT 0.0,
             earnings_percentage NUMERIC(5,2) DEFAULT 100.0
         )`);
 
-        // Admin Account එක නැත්නම් විතරක් එකතු කිරීම
+        // Admin Account
         const adminCheck = await sql(`SELECT * FROM users WHERE username = 'admin'`);
         if (adminCheck.length === 0) {
             await sql(`INSERT INTO users (username, password, email, balance_numeric, address, contact, earnings_percentage) 
@@ -45,14 +43,6 @@ async function initDb() {
             status VARCHAR(20) NOT NULL,
             timestamp VARCHAR(50) NOT NULL
         )`);
-
-        // Sample logs නැත්නම් විතරක් දීම
-        const logsCheck = await sql(`SELECT * FROM task_logs`);
-        if (logsCheck.length === 0) {
-            await sql(`INSERT INTO task_logs (username, task_name, amount, status, timestamp) VALUES 
-                       ('sample_user', 'CPA Offer #1', 1.50, 'Success', '2026-06-08 10:00'),
-                       ('sample_user', 'CPA Offer #2', 0.00, 'Failed', '2026-06-08 10:15')`);
-        }
 
         // CPA Configs Table
         await sql(`CREATE TABLE IF NOT EXISTS cpa_configs (
@@ -82,19 +72,23 @@ async function initDb() {
             timestamp VARCHAR(50) NOT NULL
         )`);
 
-        const notifCheck = await sql(`SELECT * FROM notifications`);
-        if (notifCheck.length === 0) {
-            await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES ('all', 'Welcome to Galaxy Workers Network! Keep doing tasks to earn more.', '2026-06-08 09:00')`);
-        }
-
         console.log("Neon Database Tables Initialized Successfully!");
     } catch (err) {
         console.error("Database Init Error:", err);
     }
 }
-initDb();
 
-// Settings Helper Functions using Neon DB
+// ⚠️ Middleware to ensure DB tables exist before handling requests safely on Vercel
+let dbInitialized = false;
+app.use(async (req, res, next) => {
+    if (!dbInitialized) {
+        await initDb();
+        dbInitialized = true;
+    }
+    next();
+});
+
+// Settings Helper Functions
 async function dbGetSetting(key) {
     const rows = await sql(`SELECT value FROM system_settings WHERE key = $1`, [key]);
     return rows.length > 0 ? { key, value: rows[0].value } : null;
@@ -258,6 +252,7 @@ app.post('/register', async (req, res) => {
         await backupToGoogleSheet(username, email, 0.0, 0); 
         res.send("<script>alert('Registration Successful!'); window.location.href='/';</script>");
     } catch (err) {
+        console.error(err);
         res.send(`<script>alert('Error registering user.'); window.location.href='/register';</script>`);
     }
 });
