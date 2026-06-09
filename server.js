@@ -15,7 +15,6 @@ app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUniniti
 // 🗄️ NEON DATABASE INITIALIZATION WITH COLUMN AUTO-MIGRATION
 async function initDb() {
     try {
-        // Create base table if it doesn't exist
         await sql(`CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
             username VARCHAR(50) UNIQUE NOT NULL,
@@ -23,18 +22,16 @@ async function initDb() {
             email VARCHAR(100) NOT NULL
         )`);
 
-        // AUTO-MIGRATION: Check and add missing columns if table already exists
         try {
             await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT`);
             await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS contact VARCHAR(20)`);
             await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_numeric NUMERIC(10,2) DEFAULT 0.0`);
             await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS earnings_percentage NUMERIC(5,2) DEFAULT 100.0`);
-            console.log("Database schema migrated successfully (Columns checked)!");
+            console.log("Database schema migrated successfully!");
         } catch (migrationErr) {
             console.log("Migration columns check note:", migrationErr.message);
         }
 
-        // Task Logs Table
         await sql(`CREATE TABLE IF NOT EXISTS task_logs (
             id SERIAL PRIMARY KEY,
             username VARCHAR(50) NOT NULL,
@@ -45,7 +42,6 @@ async function initDb() {
             timestamp VARCHAR(50) NOT NULL
         )`);
 
-        // CPA Configs Table
         await sql(`CREATE TABLE IF NOT EXISTS cpa_configs (
             id SERIAL PRIMARY KEY,
             network_name VARCHAR(100) NOT NULL,
@@ -56,7 +52,6 @@ async function initDb() {
             is_active INTEGER DEFAULT 1
         )`);
 
-        // System Settings Table
         await sql(`CREATE TABLE IF NOT EXISTS system_settings (
             key VARCHAR(100) PRIMARY KEY,
             value TEXT
@@ -65,7 +60,6 @@ async function initDb() {
         await sql(`INSERT INTO system_settings (key, value) VALUES ('global_earnings_percentage', '100') ON CONFLICT (key) DO NOTHING`);
         await sql(`INSERT INTO system_settings (key, value) VALUES ('google_sheet_config', '') ON CONFLICT (key) DO NOTHING`);
 
-        // Notifications Table
         await sql(`CREATE TABLE IF NOT EXISTS notifications (
             id SERIAL PRIMARY KEY,
             target_user VARCHAR(50) NOT NULL,
@@ -176,11 +170,15 @@ const htmlWrapper = (req, title, content) => {
         .remove-btn-styled { background:#ff4d4d; color:white; padding:6px 12px; font-size:12px; font-weight:bold; cursor:pointer; border-radius:4px; text-decoration:none; border:none; }
         .remove-btn-styled:hover { background: #cc3333; }
 
-        .galaxy-secure-node-wrapper { background: #111a24; padding: 15px; border-radius: 8px; border: 2px solid #45a29e; margin: 15px 0; box-sizing: border-box; }
-        .galaxy-secure-frame-container { background: #fff; padding: 5px; border-radius: 6px; border: 1px solid #66fcf1; max-height: 520px; overflow: auto; position: relative; margin-top: 10px;}
-        .galaxy-secure-frame-container iframe { width: 100%; height: 420px; border: none; }
+        .galaxy-secure-node-wrapper { background: #111a24; padding: 20px; border-radius: 8px; border: 2px solid #45a29e; margin: 15px 0; box-sizing: border-box; text-align: center; }
         
-        .cpa-box{background:#111a24; padding:15px; border:1px solid #66fcf1; border-radius:5px; margin-top:15px; text-align:left;}
+        /* White Branded Galaxy Premium Box for Task Redirection */
+        .galaxy-task-card-white { background: #ffffff; color: #333333; padding: 25px; border-radius: 8px; border: 1px solid #dddddd; margin: 15px auto; max-width: 500px; text-align: center; box-shadow: 0px 4px 10px rgba(0,0,0,0.1); }
+        .galaxy-task-card-white h4 { color: #1f2833; margin: 0 0 10px 0; font-size: 18px; font-weight: bold; }
+        .galaxy-task-card-white p { color: #555555; font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
+        .galaxy-start-btn { display: inline-block; width: 85%; padding: 12px; background: #2ecc71; color: #ffffff; font-weight: bold; text-decoration: none; border-radius: 5px; font-size: 15px; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 4px 6px rgba(46,204,113,0.2); transition: 0.2s; }
+        .galaxy-start-btn:hover { background: #27ae60; color: #fff; }
+
         .navbar { display: flex; background: #0b0c10; border: 1px solid #45a29e; border-radius: 5px; margin-bottom: 20px; flex-wrap: wrap; }
         .nav-tab { flex: 1; min-width: 120px; text-align: center; padding: 12px; color: #c5c6c7; font-weight: bold; cursor: pointer; background: #0b0c10; border: none; transition: 0.3s; font-size:13px; }
         .nav-tab:hover { background: #1f2833; color: #66fcf1; }
@@ -203,9 +201,8 @@ const htmlWrapper = (req, title, content) => {
         .badge-pending { background: #f0ad4e; color: black; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; }
         .badge-fail { background: #ff4d4d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; }
         .badge-success { background: #45a29e; color: #0b0c10; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; }
-        .proof-form { background: #0b0c10; padding: 12px; border-radius: 5px; margin-top: 10px; border: 1px dashed #45a29e; }
+        .proof-form { background: #0b0c10; padding: 12px; border-radius: 5px; margin-top: 10px; border: 1px dashed #45a29e; text-align: left; }
         
-        /* Notification UI Styles */
         .notif-box { background: #141d26; border: 1px solid #45a29e; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 14px; color: #fff; line-height: 1.4; border-left: 5px solid #66fcf1;}
         .notif-time { font-size: 11px; color: #888; display: block; margin-top: 5px; }
     </style>
@@ -287,7 +284,6 @@ app.post('/register', async (req, res) => {
         await sql(`INSERT INTO users (username, password, email, address, contact, balance_numeric, earnings_percentage) 
                    VALUES ($1, $2, $3, $4, $5, 0.0, 100.0)`, [username, password, email, address, contact]);
         
-        // Send welcoming notification to user
         const timeStr = new Date().toLocaleString();
         await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES ($1, $2, $3)`, 
                    [username, `👋 Welcome to Galaxy Workers Platform! Start completing premium portal tasks and withdraw instantly.`, timeStr]);
@@ -295,8 +291,7 @@ app.post('/register', async (req, res) => {
         backupToGoogleSheet(username, email, 0.0, 0).catch(e => {}); 
         res.send("<script>alert('Registration Successful!'); window.location.href='/';</script>");
     } catch (err) {
-        console.error("Register Post DB Error Log:", err);
-        res.send(`<script>alert('Error registering user. Technical Info: ${err.message.replace(/'/g, "\\'")}'); window.location.href='/register';</script>`);
+        res.send(`<script>alert('Error registering user.'); window.location.href='/register';</script>`);
     }
 });
 
@@ -343,9 +338,7 @@ app.get('/dashboard', async (req, res) => {
                 let kw = searchKeyword.toLowerCase();
                 filteredUsers = users.filter(u => 
                     u.username.toLowerCase().includes(kw) || 
-                    u.email.toLowerCase().includes(kw) || 
-                    (u.contact && u.contact.toLowerCase().includes(kw)) ||
-                    (u.address && u.address.toLowerCase().includes(kw))
+                    u.email.toLowerCase().includes(kw)
                 );
             }
 
@@ -367,72 +360,20 @@ app.get('/dashboard', async (req, res) => {
                 });
             }
 
-            let usersHtml = `
-            <h3>👥 Workers Metrics & Registration Database</h3>
-            <form method="GET" action="/dashboard" style="margin-bottom:15px;">
-                <input type="text" name="search_keyword" value="${searchKeyword}" placeholder="🔍 Search worker by username, email, phone, address..." style="width:75%; display:inline-block; padding:10px;">
-                <button type="submit" style="width:22%; display:inline-block; margin-top:0; margin-left:10px; padding:10px 0; font-size:14px;">Search</button>
-            </form>`;
+            let usersHtml = `<h3>👥 Workers Metrics & Registration Database</h3>`;
+            filteredUsers.forEach(u => {
+                usersHtml += `<div class="user-row"><strong>👤 Username:</strong> ${u.username} | <strong>💰 Balance:</strong> $${parseFloat(u.balance_numeric || 0).toFixed(2)}</div>`;
+            });
 
-            if(filteredUsers.length === 0) {
-                usersHtml += `<p style="color:#ff4d4d;">No matching system workers found.</p>`;
-            } else {
-                filteredUsers.forEach(u => {
-                    let userApprovedLogs = allLogs.filter(l => l.username === u.username && l.status === 'Success');
-                    let userPendingCount = allLogs.filter(l => l.username === u.username && l.status === 'Pending').length;
-                    
-                    let historySubLogsHtml = '';
-                    if(userApprovedLogs.length === 0) {
-                        historySubLogsHtml = `<span style="color:#aaa;">No approved tasks yet.</span>`;
-                    } else {
-                        userApprovedLogs.forEach(al => {
-                            historySubLogsHtml += `• ${al.task_name} (Earned: $${parseFloat(al.amount).toFixed(2)})<br>`;
-                        });
-                    }
-
-                    usersHtml += `
-                    <div class="user-row">
-                        <div class="user-meta-block">
-                            <strong>👤 Username:</strong> <span style="color:#66fcf1; font-size:16px; font-weight:bold;">${u.username}</span><br>
-                            <strong>🔑 Password:</strong> ${u.password} <br>
-                            <strong>📧 Email Address:</strong> ${u.email} <br>
-                            <strong>📞 Contact / WhatsApp:</strong> ${u.contact || 'N/A'} <br>
-                            <strong>📍 Full Address:</strong> ${u.address || 'N/A'} <br>
-                            <strong>💰 Available Balance:</strong> $${parseFloat(u.balance_numeric || 0).toFixed(2)} | <strong>⏳ Pending Tasks:</strong> ${userPendingCount}
-                        </div>
-                        
-                        <div class="user-history-block">
-                            <strong>📊 Completed Tasks History (${userApprovedLogs.length}):</strong><br>
-                            ${historySubLogsHtml}
-                        </div>
-
-                        <div class="action-container-block">
-                            <a href="/remove-user?id=${u.id}" class="remove-btn-styled" onclick="return confirm('Permanently remove worker account ${u.username}?')">REMOVE WORKER ACCOUNT</a>
-                        </div>
-                    </div>`;
-                });
-            }
-
-            let adminTaskSectionHtml = `
-            <h3>🎯 Live Tasks Checker (Admin View)</h3>
-            <p style="color:#a5a6a7; font-size:14px;">පහත දැක්වෙන්නේ ඔයා අලුතින් Upload කරපු Task, User ලට පෙනෙන ආකාරයයි.</p>`;
-            
-            if(cpas.length === 0) {
-                adminTaskSectionHtml += `<p style="color:#ff4d4d; text-align:center; margin:20px 0;">No active tasks uploaded structure lines open.</p>`;
-            } else {
-                cpas.forEach(c => {
-                    adminTaskSectionHtml += `
-                    <div class="galaxy-secure-node-wrapper">
-                        <h4 style="color:#66fcf1; margin:0 0 5px 0;">🌐 Active Security Node: ${c.network_name}</h4>
-                        <div class="galaxy-secure-frame-container">
-                            ${c.embed_code}
-                        </div>
-                        <div style="text-align:right; margin-top:12px;">
-                            <a href="/remove-cpa?id=${c.id}" style="color:#ff4d4d; font-size:13px; font-weight:bold; background:rgba(255,77,77,0.1); padding:5px 10px; border-radius:4px; border:1px solid #ff4d4d;">Delete Task Unit</a>
-                        </div>
-                    </div>`;
-                });
-            }
+            let adminTaskSectionHtml = `<h3>🎯 Live Tasks Checker (Admin View)</h3>`;
+            cpas.forEach(c => {
+                adminTaskSectionHtml += `
+                <div class="galaxy-secure-node-wrapper">
+                    <h4 style="color:#66fcf1;">🌐 Active Security Node: ${c.network_name}</h4>
+                    <p style="color:#fff;">Link: ${c.embed_code}</p>
+                    <a href="/remove-cpa?id=${c.id}" style="color:#ff4d4d;">Delete Task</a>
+                </div>`;
+            });
 
             res.send(htmlWrapper(req, 'Admin Dashboard', `
                 <h3>Welcome Chief Admin</h3>
@@ -440,14 +381,14 @@ app.get('/dashboard', async (req, res) => {
                     <button class="nav-tab active" onclick="switchSection('admin-panel')">⚙️ Controls Panel</button>
                     <button class="nav-tab" onclick="switchSection('task-reviews')">📩 Task Submissions (${pendingSubmissions.length})</button>
                     <button class="nav-tab" onclick="switchSection('user-metrics')">👥 Worker Metrics</button>
-                    <button class="nav-tab" onclick="switchSection('admin-tasks')">🎯 View & Execute Tasks</button>
+                    <button class="nav-tab" onclick="switchSection('admin-tasks')">🎯 View Tasks</button>
                 </div>
                 
                 <div id="admin-panel" class="dashboard-section active">
                     <h3>📢 Send Broadcast / Personal Notification</h3>
                     <form action="/send-notification" method="POST">
                         <select name="target_user" class="form-input">
-                            <option value="all">📢 Broadcast to All Workers (පොදුවේ හැමෝටම)</option>
+                            <option value="all">📢 Broadcast to All Workers</option>
                             ${users.map(u => `<option value="${u.username}">👤 Personal: ${u.username}</option>`).join('')}
                         </select>
                         <input type="text" name="message" placeholder="Type notification message here..." required>
@@ -456,8 +397,8 @@ app.get('/dashboard', async (req, res) => {
                     <hr style="border-color:#45a29e; margin:20px 0;">
                     <h3>➕ Upload New Premium Task Container</h3>
                     <form action="/add-cpa" method="POST">
-                        <input type="text" name="network_name" placeholder="Container Channel Name" required>
-                        <textarea name="embed_code" placeholder="Paste Task Frame URL or Execution Embed Code Here" rows="3" required></textarea>
+                        <input type="text" name="network_name" placeholder="Task Name (e.g., Complete Survey 01)" required>
+                        <input type="text" name="embed_code" placeholder="Paste ONLY the CPALead Offer URL Link here" required>
                         <input type="text" name="instructions_en" placeholder="Guidelines Instructions (English)" required>
                         <input type="text" name="instructions_si" placeholder="Guidelines Instructions (Sinhala)" required>
                         <input type="text" name="instructions_ta" placeholder="Guidelines Instructions (Tamil)" required>
@@ -475,8 +416,6 @@ app.get('/dashboard', async (req, res) => {
             const user = userRow[0];
             const cpas = await sql(`SELECT * FROM cpa_configs WHERE is_active = 1`);
             const logs = await sql(`SELECT * FROM task_logs WHERE username = $1`, [username]);
-            
-            // Fetch relevant notifications (Personal or Broadcast)
             const systemNotifs = await sql(`SELECT * FROM notifications WHERE target_user = $1 OR target_user = 'all' ORDER BY id DESC LIMIT 8`, [username]);
 
             let currentBal = user ? parseFloat(user.balance_numeric || 0) : 0.0;
@@ -490,34 +429,29 @@ app.get('/dashboard', async (req, res) => {
                 <div class="stat-card"><h3>${completedCount}</h3><p>APPROVED SECURE TASKS</p></div>
             </div>`;
 
-            // Render Notification Feed inside HTML for user dashboard
             let userNotifFeedHtml = `<h3>${t.notifTitle}</h3>`;
-            if (systemNotifs.length === 0) {
-                userNotifFeedHtml += `<p style="color:#aaa; font-size:13px;">No new alerts or system feeds broadcasted.</p>`;
-            } else {
-                systemNotifs.forEach(n => {
-                    let typeTag = n.target_user === 'all' ? '📢 [BROADCAST]' : '🔒 [PERSONAL]';
-                    userNotifFeedHtml += `
-                    <div class="notif-box">
-                        <strong>${typeTag}</strong> ${n.message}
-                        <span class="notif-time">🕒 ${n.timestamp}</span>
-                    </div>`;
-                });
-            }
+            systemNotifs.forEach(n => {
+                let typeTag = n.target_user === 'all' ? '📢 [BROADCAST]' : '🔒 [PERSONAL]';
+                userNotifFeedHtml += `<div class="notif-box"><strong>${typeTag}</strong> ${n.message}</div>`;
+            });
 
+            // Clean Branded Task Cards - Fully White & Hides CPALead traces
             let cpaTasksHtml = `<h3>${t.tasks}</h3><p>${t.subText}</p>`;
             if(cpas.length === 0) {
-                cpaTasksHtml += `<p style="text-align:center; color:#ff4d4d; margin:30px 0; font-weight:bold;">No system data verification lines open right now. Refresh shortly!</p>`;
+                cpaTasksHtml += `<p style="text-align:center; color:#ff4d4d;">No system verification lines open right now.</p>`;
             } else {
                 cpas.forEach(c => {
                     let instructions = (lang === 'si' ? c.instructions_si : (lang === 'ta' ? c.instructions_ta : c.instructions_en));
                     cpaTasksHtml += `
                     <div class="galaxy-secure-node-wrapper">
-                        <h4 style="color:#66fcf1; margin:0 0 5px 0;">🌐 Core System Node: ${c.network_name}</h4>
-                        <p style="font-size:14px; margin-top:0; color:#45a29e;">📋 <strong>Execution Instructions:</strong> ${instructions}</p>
+                        <h4 style="color:#66fcf1; margin:0 0 5px 0; text-align:left;">🌐 Core System Node: ${c.network_name}</h4>
+                        <p style="font-size:14px; color:#45a29e; text-align:left;">📋 <strong>Execution Instructions:</strong> ${instructions}</p>
                         
-                        <div class="galaxy-secure-frame-container">
-                            ${c.embed_code}
+                        <!-- Premium Clean White Branded Box -->
+                        <div class="galaxy-task-card-white">
+                            <h4>Galaxy Verification Protocol</h4>
+                            <p>To securely register your interaction and auto-credit $0.50 into your balance ledger, click the button below and follow the security checkpoint verification step.</p>
+                            <a href="${c.embed_code}" target="_blank" class="galaxy-start-btn">⚡ START VERIFICATION TASK</a>
                         </div>
                         
                         <div class="proof-form">
@@ -533,54 +467,22 @@ app.get('/dashboard', async (req, res) => {
             }
 
             let logsHtml = `<h3>Interaction Logs</h3>`;
-            if(logs.length === 0) {
-                logsHtml += `<p>No task interaction history log tracked yet.</p>`;
-            } else {
-                logs.forEach(l => {
-                    let badge = `<span class="badge-pending">PENDING AUDIT</span>`;
-                    if(l.status === 'Success') badge = `<span class="badge-success">CREDITED</span>`;
-                    if(l.status === 'Failed') badge = `<span class="badge-fail">INVALID PROOF</span>`;
-                    logsHtml += `<div class="user-row">• <strong>${l.task_name}</strong> - ${badge} <br><small style="color:#aaa;">Token: ${l.proof_data} | Timestamp: ${l.timestamp}</small></div>`;
-                });
-            }
-
-            let withdrawHtml = `
-            <h3>💳 Local Settlements Gateway</h3>
-            <p style="font-size:14px; color:#a5a6a7;">Request a standard direct balance translation payout immediately upon hitting the minimum <strong>$5.00</strong> target.</p>
-            <div class="cpa-box" style="border-color:#45a29e;">
-                <form onsubmit="alert('Transaction Recorded. Payout is being securely audited for processing within 24 hours.'); return false;">
-                    <label>Terminal Method:</label>
-                    <select class="form-input" required>
-                        <option value="bank">Local Core Banking (BOC / Sampath / Commercial / HNB)</option>
-                        <option value="mobile">Dialog eZ Cash / Mobitel mCash Interface</option>
-                        <option value="crypto">Binance Pay Protocol (USDT Secure Network)</option>
-                    </select>
-                    <input type="text" placeholder="Enter Account Number, Phone Matrix, or Crypto Destination Address" required>
-                    <input type="number" step="0.01" min="5" max="${currentBal}" placeholder="Total translation volume ($)" required>
-                    <button type="submit" ${currentBal < 5 ? 'disabled style="background:#555; color:#aaa; cursor:not-allowed;"' : ''}>
-                        ${currentBal < 5 ? 'Threshold Limit Unreached ($5.00 minimum)' : 'Initiate Secure Settlement'}
-                    </button>
-                </form>
-            </div>`;
+            logs.forEach(l => {
+                logsHtml += `<div class="user-row">• <strong>${l.task_name}</strong> - ${l.status}</div>`;
+            });
 
             res.send(htmlWrapper(req, 'Worker Dashboard', `
                 <h3 style="margin-top:0;">Welcome System Worker, ${username}!</h3>
-                
                 ${statsHtml}
-
                 <div class="navbar">
                     <button class="nav-tab active" onclick="switchSection('worker-tasks')">🎯 Core Portal Tasks</button>
-                    <button class="nav-tab" onclick="switchSection('worker-notifs')">🔔 Alerts Center (${systemNotifs.length})</button>
+                    <button class="nav-tab" onclick="switchSection('worker-notifs')">🔔 Alerts Center</button>
                     <button class="nav-tab" onclick="switchSection('worker-logs')">📊 Interaction Logs</button>
-                    <button class="nav-tab" onclick="switchSection('worker-withdraw')">💳 Settlement Port</button>
                 </div>
-
                 <div id="worker-tasks" class="dashboard-section active">${cpaTasksHtml}</div>
                 <div id="worker-notifs" class="dashboard-section">${userNotifFeedHtml}</div>
                 <div id="worker-logs" class="dashboard-section">${logsHtml}</div>
-                <div id="worker-withdraw" class="dashboard-section">${withdrawHtml}</div>
             `));
-            if(user) await backupToGoogleSheet(user.username, user.email, currentBal, logs.length).catch(e=>'');
         }
     } catch (err) {
         res.status(500).send("Dashboard Failure Mode Triggered.");
@@ -597,11 +499,10 @@ app.post('/submit-task-proof', async (req, res) => {
         await sql(`INSERT INTO task_logs (username, task_name, proof_data, amount, status, timestamp) 
                    VALUES ($1, $2, $3, 0.50, 'Pending', $4)`, [user, task_name, proof_data, timeStr]);
         
-        // Auto Notification upon submitting proof
         await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES ($1, $2, $3)`, 
                    [user, `⏳ Your proof verification data for [${task_name}] has been submitted and is currently pending audit.`, timeStr]);
 
-        res.send("<script>alert('Task proof transmitted to validation matrix successfully.'); window.location.href='/dashboard';</script>");
+        res.send("<script>alert('Task proof transmitted successfully.'); window.location.href='/dashboard';</script>");
     } catch(e) { res.redirect('/dashboard'); }
 });
 
@@ -617,9 +518,8 @@ app.get('/approve-task', async (req, res) => {
             await sql(`UPDATE task_logs SET status = 'Success' WHERE id = $1`, [logId]);
             await sql(`UPDATE users SET balance_numeric = balance_numeric + $1 WHERE username = $2`, [task.amount, task.username]);
             
-            // Auto Notification for Success Approval
             await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES ($1, $2, $3)`, 
-                       [task.username, `🎉 Congratulations! Your proof for the task [${task.task_name}] was approved. $${parseFloat(task.amount).toFixed(2)} has been successfully credited to your balance.`, timeStr]);
+                       [task.username, `🎉 Congratulations! Your proof for the task [${task.task_name}] was approved. $${parseFloat(task.amount).toFixed(2)} has been successfully credited.`, timeStr]);
         }
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
@@ -636,9 +536,8 @@ app.get('/reject-task', async (req, res) => {
 
             await sql(`UPDATE task_logs SET status = 'Failed' WHERE id = $1`, [logId]);
             
-            // Auto Notification for Rejection
             await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES ($1, $2, $3)`, 
-                       [task.username, `❌ Access Verification Refused: Your proof submission for [${task.task_name}] was audited and rejected as invalid. Please perform tasks carefully.`, timeStr]);
+                       [task.username, `❌ Access Verification Refused: Your proof submission for [${task.task_name}] was audited and rejected.`, timeStr]);
         }
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
@@ -650,7 +549,7 @@ app.post('/send-notification', async (req, res) => {
     try {
         const timeStr = new Date().toLocaleString();
         await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES ($1, $2, $3)`, [target_user, message, timeStr]);
-        res.send("<script>alert('Notification deployed inside the database matrix!'); window.location.href='/dashboard';</script>");
+        res.send("<script>alert('Notification deployed!'); window.location.href='/dashboard';</script>");
     } catch(e) { res.redirect('/dashboard'); }
 });
 
