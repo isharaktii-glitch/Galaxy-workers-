@@ -23,7 +23,7 @@ async function initDb() {
             email VARCHAR(100) NOT NULL
         )`);
 
-        // 🚨 AUTO-MIGRATION: Check and add missing columns if table already exists
+        // AUTO-MIGRATION: Check and add missing columns if table already exists
         try {
             await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT`);
             await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS contact VARCHAR(20)`);
@@ -122,7 +122,8 @@ const translations = {
         backLog: "Back to Login", welcome: "Welcome", total: "Your Total Earnings", tasks: "Available Premium Micro Tasks 👇",
         subText: "Complete the verified Galaxy system tasks below. Submit accurate proof data for fast validation.", logout: "Logout",
         forgot: "Forgot Password?", recoverTitle: "Recover Password", btnRecover: "RECOVER",
-        cpaTitle: "🔗 Internal Galaxy Portal Tasks Setup", taskInstr: "Task Steps & Guidelines"
+        cpaTitle: "🔗 Internal Galaxy Portal Tasks Setup", taskInstr: "Task Steps & Guidelines",
+        notifTitle: "🔔 Notification Center & Alert Feeds"
     },
     si: {
         title: "GALAXY WORKERS", login: "සේවක ඇතුල්වීම", reg: "සේවක ලියාපදිංචිය",
@@ -131,16 +132,18 @@ const translations = {
         backLog: "නැවත මුල් පිටුවට", welcome: "ආයුබෝවන්", total: "ඔබේ මුළු උපයනය", tasks: "ලබාගත හැකි විශ්වාසවන්ත සරල වැඩ (Tasks) 👇",
         subText: "පහත දැක්වෙන Galaxy පද්ධති පියවර සම්පූර්ණ කරන්න. තහවුරු කිරීමට නිවැරදි සාක්ෂි (Proofs) ඇතුළත් කරන්න.", logout: "ඉවත් වන්න (Logout)",
         forgot: "මුරපදය අමතකද? (Forgot Password)", recoverTitle: "මුරපදය නැවත ලබාගැනීම", btnRecover: "මුරපදය පෙන්වන්න",
-        cpaTitle: "🔗 Galaxy පද්ධති අභ්‍යන්තර Tasks සැකසුම්", taskInstr: "වැඩසටහනේ පියවර සහ උපදෙස්"
+        cpaTitle: "🔗 Galaxy පද්ධති අභ්‍යන්තර Tasks සැකසුම්", taskInstr: "වැඩසටහනේ පියවර සහ උපදෙස්",
+        notifTitle: "🔔 පණිවිඩ සහ නිවේදන පුවරුව"
     },
     ta: {
         title: "GALAXY WORKERS", login: "பணியாளர் உள்நுழைவு", reg: "பணியாளர் பதிவு",
         user: "பயனர் பெயர் (Username)", pass: "கடவுச்சொல் (Password)", email: "மின்னஞ்சல் முகவரி", addr: "முழு முகவரி", phone: "தொலைபேசி எண்",
         btnLog: "உள்நுழைக", btnReg: "பதிவு செய்க", noAcc: "கணக்கு இல்லையா?", regHere: "இங்கே பதிவு செய்யவும்",
-        backLog: "மீண்டும் உள்நுழைய", welcome: "வரவேற்கிறோம்", total: "உங்கள் மொத்த வருவாய்", tasks: "கிடைக்கக்கூடிய பணிகள் 👇",
+        backLog: "மீண்டும் உள்நுழ்ய", welcome: "வரவேற்கிறோம்", total: "உங்கள் மொத்த வருவாய்", tasks: "கிடைக்கக்கூடிய பணிகள் 👇",
         subText: "கீழே உள்ள பணிகளை முடிக்கவும். உங்கள் சான்றுகளையும் சமர்ப்பிக்கவும்.", logout: "வெளியேறு (Logout)",
         forgot: "கடவுச்சொல் மறந்துவிட்டதா?", recoverTitle: "கடவுச்சொல்லை மீட்டெடுக்கவும்", btnRecover: "மீட்டெடுப்போம்",
-        cpaTitle: "🔗 CPA நெட்வொர்க் இணைப்பு அமைப்புகள்", taskInstr: "பணி வழிமுறைகள்"
+        cpaTitle: "🔗 CPA நெட்வொர்க் இணைப்பு அமைப்புகள்", taskInstr: "பணி வழிமுறைகள்",
+        notifTitle: "🔔 அறிவிப்பு மையம்"
     }
 };
 
@@ -201,6 +204,10 @@ const htmlWrapper = (req, title, content) => {
         .badge-fail { background: #ff4d4d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; }
         .badge-success { background: #45a29e; color: #0b0c10; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; }
         .proof-form { background: #0b0c10; padding: 12px; border-radius: 5px; margin-top: 10px; border: 1px dashed #45a29e; }
+        
+        /* Notification UI Styles */
+        .notif-box { background: #141d26; border: 1px solid #45a29e; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 14px; color: #fff; line-height: 1.4; border-left: 5px solid #66fcf1;}
+        .notif-time { font-size: 11px; color: #888; display: block; margin-top: 5px; }
     </style>
     <script>
         function switchSection(sectionId) {
@@ -268,7 +275,6 @@ app.get('/register', (req, res) => {
     `));
 });
 
-// FIXED Neon Array Param Binding to completely resolve syntax error bugs
 app.post('/register', async (req, res) => {
     const { username, password, email, address, contact } = req.body;
     try {
@@ -281,6 +287,11 @@ app.post('/register', async (req, res) => {
         await sql(`INSERT INTO users (username, password, email, address, contact, balance_numeric, earnings_percentage) 
                    VALUES ($1, $2, $3, $4, $5, 0.0, 100.0)`, [username, password, email, address, contact]);
         
+        // Send welcoming notification to user
+        const timeStr = new Date().toLocaleString();
+        await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES ($1, $2, $3)`, 
+                   [username, `👋 Welcome to Galaxy Workers Platform! Start completing premium portal tasks and withdraw instantly.`, timeStr]);
+
         backupToGoogleSheet(username, email, 0.0, 0).catch(e => {}); 
         res.send("<script>alert('Registration Successful!'); window.location.href='/';</script>");
     } catch (err) {
@@ -433,11 +444,14 @@ app.get('/dashboard', async (req, res) => {
                 </div>
                 
                 <div id="admin-panel" class="dashboard-section active">
-                    <h3>📢 Broadcast Notifications</h3>
+                    <h3>📢 Send Broadcast / Personal Notification</h3>
                     <form action="/send-notification" method="POST">
-                        <select name="target_user" class="form-input"><option value="all">Broadcast to All Workers</option>${users.map(u => `<option value="${u.username}">${u.username}</option>`).join('')}</select>
-                        <input type="text" name="message" placeholder="Message..." required>
-                        <button type="submit">Send</button>
+                        <select name="target_user" class="form-input">
+                            <option value="all">📢 Broadcast to All Workers (පොදුවේ හැමෝටම)</option>
+                            ${users.map(u => `<option value="${u.username}">👤 Personal: ${u.username}</option>`).join('')}
+                        </select>
+                        <input type="text" name="message" placeholder="Type notification message here..." required>
+                        <button type="submit">Deploy System Notification</button>
                     </form>
                     <hr style="border-color:#45a29e; margin:20px 0;">
                     <h3>➕ Upload New Premium Task Container</h3>
@@ -461,6 +475,9 @@ app.get('/dashboard', async (req, res) => {
             const user = userRow[0];
             const cpas = await sql(`SELECT * FROM cpa_configs WHERE is_active = 1`);
             const logs = await sql(`SELECT * FROM task_logs WHERE username = $1`, [username]);
+            
+            // Fetch relevant notifications (Personal or Broadcast)
+            const systemNotifs = await sql(`SELECT * FROM notifications WHERE target_user = $1 OR target_user = 'all' ORDER BY id DESC LIMIT 8`, [username]);
 
             let currentBal = user ? parseFloat(user.balance_numeric || 0) : 0.0;
             let pendingCount = logs.filter(l => l.status === 'Pending').length;
@@ -472,6 +489,21 @@ app.get('/dashboard', async (req, res) => {
                 <div class="stat-card"><h3>${pendingCount}</h3><p>PENDING REVIEW</p></div>
                 <div class="stat-card"><h3>${completedCount}</h3><p>APPROVED SECURE TASKS</p></div>
             </div>`;
+
+            // Render Notification Feed inside HTML for user dashboard
+            let userNotifFeedHtml = `<h3>${t.notifTitle}</h3>`;
+            if (systemNotifs.length === 0) {
+                userNotifFeedHtml += `<p style="color:#aaa; font-size:13px;">No new alerts or system feeds broadcasted.</p>`;
+            } else {
+                systemNotifs.forEach(n => {
+                    let typeTag = n.target_user === 'all' ? '📢 [BROADCAST]' : '🔒 [PERSONAL]';
+                    userNotifFeedHtml += `
+                    <div class="notif-box">
+                        <strong>${typeTag}</strong> ${n.message}
+                        <span class="notif-time">🕒 ${n.timestamp}</span>
+                    </div>`;
+                });
+            }
 
             let cpaTasksHtml = `<h3>${t.tasks}</h3><p>${t.subText}</p>`;
             if(cpas.length === 0) {
@@ -538,11 +570,13 @@ app.get('/dashboard', async (req, res) => {
 
                 <div class="navbar">
                     <button class="nav-tab active" onclick="switchSection('worker-tasks')">🎯 Core Portal Tasks</button>
+                    <button class="nav-tab" onclick="switchSection('worker-notifs')">🔔 Alerts Center (${systemNotifs.length})</button>
                     <button class="nav-tab" onclick="switchSection('worker-logs')">📊 Interaction Logs</button>
                     <button class="nav-tab" onclick="switchSection('worker-withdraw')">💳 Settlement Port</button>
                 </div>
 
                 <div id="worker-tasks" class="dashboard-section active">${cpaTasksHtml}</div>
+                <div id="worker-notifs" class="dashboard-section">${userNotifFeedHtml}</div>
                 <div id="worker-logs" class="dashboard-section">${logsHtml}</div>
                 <div id="worker-withdraw" class="dashboard-section">${withdrawHtml}</div>
             `));
@@ -562,6 +596,11 @@ app.post('/submit-task-proof', async (req, res) => {
         const timeStr = new Date().toLocaleString();
         await sql(`INSERT INTO task_logs (username, task_name, proof_data, amount, status, timestamp) 
                    VALUES ($1, $2, $3, 0.50, 'Pending', $4)`, [user, task_name, proof_data, timeStr]);
+        
+        // Auto Notification upon submitting proof
+        await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES ($1, $2, $3)`, 
+                   [user, `⏳ Your proof verification data for [${task_name}] has been submitted and is currently pending audit.`, timeStr]);
+
         res.send("<script>alert('Task proof transmitted to validation matrix successfully.'); window.location.href='/dashboard';</script>");
     } catch(e) { res.redirect('/dashboard'); }
 });
@@ -573,8 +612,14 @@ app.get('/approve-task', async (req, res) => {
         const logRow = await sql(`SELECT * FROM task_logs WHERE id = $1`, [logId]);
         if(logRow.length > 0 && logRow[0].status === 'Pending') {
             const task = logRow[0];
+            const timeStr = new Date().toLocaleString();
+            
             await sql(`UPDATE task_logs SET status = 'Success' WHERE id = $1`, [logId]);
             await sql(`UPDATE users SET balance_numeric = balance_numeric + $1 WHERE username = $2`, [task.amount, task.username]);
+            
+            // Auto Notification for Success Approval
+            await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES ($1, $2, $3)`, 
+                       [task.username, `🎉 Congratulations! Your proof for the task [${task.task_name}] was approved. $${parseFloat(task.amount).toFixed(2)} has been successfully credited to your balance.`, timeStr]);
         }
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
@@ -584,7 +629,17 @@ app.get('/reject-task', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const logId = parseInt(req.query.id);
     try {
-        await sql(`UPDATE task_logs SET status = 'Failed' WHERE id = $1`, [logId]);
+        const logRow = await sql(`SELECT * FROM task_logs WHERE id = $1`, [logId]);
+        if(logRow.length > 0 && logRow[0].status === 'Pending') {
+            const task = logRow[0];
+            const timeStr = new Date().toLocaleString();
+
+            await sql(`UPDATE task_logs SET status = 'Failed' WHERE id = $1`, [logId]);
+            
+            // Auto Notification for Rejection
+            await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES ($1, $2, $3)`, 
+                       [task.username, `❌ Access Verification Refused: Your proof submission for [${task.task_name}] was audited and rejected as invalid. Please perform tasks carefully.`, timeStr]);
+        }
         res.redirect('/dashboard');
     } catch(e) { res.redirect('/dashboard'); }
 });
@@ -593,9 +648,9 @@ app.post('/send-notification', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const { target_user, message } = req.body;
     try {
-        const timeStr = new Date().toISOString();
+        const timeStr = new Date().toLocaleString();
         await sql(`INSERT INTO notifications (target_user, message, timestamp) VALUES ($1, $2, $3)`, [target_user, message, timeStr]);
-        res.send("<script>alert('Notification Broadcasted!'); window.location.href='/dashboard';</script>");
+        res.send("<script>alert('Notification deployed inside the database matrix!'); window.location.href='/dashboard';</script>");
     } catch(e) { res.redirect('/dashboard'); }
 });
 
