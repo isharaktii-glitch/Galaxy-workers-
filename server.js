@@ -68,6 +68,14 @@ async function initDb() {
             is_read INTEGER DEFAULT 0
         )`);
 
+        // FIX: Auto-migrate is_read column for existing notifications table
+        try {
+            await sql(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read INTEGER DEFAULT 0`);
+            console.log("Notifications schema migrated successfully!");
+        } catch (migrationErr) {
+            console.log("Notifications migration note:", migrationErr.message);
+        }
+
         console.log("Neon Database Tables Initialized Successfully!");
     } catch (err) {
         console.error("Database Init Error:", err);
@@ -298,6 +306,7 @@ app.post('/register', async (req, res) => {
         backupToGoogleSheet(username, email, 0.0, 0).catch(e => {}); 
         res.send("<script>alert('Registration Successful!'); window.location.href='/';</script>");
     } catch (err) {
+        console.error(err);
         res.send(`<script>alert('Error registering user.'); window.location.href='/register';</script>`);
     }
 });
@@ -317,6 +326,7 @@ app.post('/login', async (req, res) => {
             res.send("<script>alert('Invalid Credentials'); window.location.href='/';</script>");
         }
     } catch (err) {
+        console.error(err);
         res.send("<script>alert('Database Error'); window.location.href='/';</script>");
     }
 });
@@ -420,6 +430,7 @@ app.get('/dashboard', async (req, res) => {
         } else {
             // WORKER VIEW
             const userRow = await sql(`SELECT * FROM users WHERE username = $1`, [username]);
+            if (!userRow || userRow.length === 0) return res.redirect('/logout');
             const user = userRow[0];
             const cpas = await sql(`SELECT * FROM cpa_configs WHERE is_active = 1`);
             const logs = await sql(`SELECT * FROM task_logs WHERE username = $1`, [username]);
@@ -471,7 +482,6 @@ app.get('/dashboard', async (req, res) => {
                         <h4 style="color:#66fcf1; margin:0 0 5px 0; text-align:left;">🌐 Core System Node: ${c.network_name}</h4>
                         <p style="font-size:14px; color:#45a29e; text-align:left;">📋 <strong>Execution Instructions:</strong> ${instructions}</p>
                         
-                        <!-- Premium Clean White Branded Box -->
                         <div class="galaxy-task-card-white">
                             <h4>Galaxy Verification Protocol</h4>
                             <p>To securely register your interaction and auto-credit $0.50 into your balance ledger, click the button below and follow the security checkpoint verification step.</p>
@@ -509,6 +519,7 @@ app.get('/dashboard', async (req, res) => {
             `));
         }
     } catch (err) {
+        console.error(err);
         res.status(500).send("Dashboard Failure Mode Triggered.");
     }
 });
