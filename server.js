@@ -1,4 +1,7 @@
-Const express = require('express');
+මගෙ site එකක් තියනවා...මේ ඒකෙ js code එක මේකෙ දැනට තියන් features මොනවද කියල කියන්න පුලුවන්ද?
+
+
+const express = require('express');
 const session = require('express-session');
 const bodyParser = require('body-parser');
 const { google } = require('googleapis');
@@ -15,7 +18,6 @@ app.use(session({ secret: 'galaxy-2026-super-secret', resave: false, saveUniniti
 // 🗄️ NEON DATABASE INITIALIZATION WITH COLUMN AUTO-MIGRATION
 async function initDb() {
     try {
-        // Create base table if it doesn't exist
         await sql(`CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
             username VARCHAR(50) UNIQUE NOT NULL,
@@ -23,18 +25,16 @@ async function initDb() {
             email VARCHAR(100) NOT NULL
         )`);
 
-        // AUTO-MIGRATION: Check and add missing columns if table already exists
         try {
             await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT`);
             await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS contact VARCHAR(20)`);
             await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_numeric NUMERIC(10,2) DEFAULT 0.0`);
             await sql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS earnings_percentage NUMERIC(5,2) DEFAULT 100.0`);
-            console.log("Database schema migrated successfully (Columns checked)!");
+            console.log("Database schema migrated successfully!");
         } catch (migrationErr) {
             console.log("Migration columns check note:", migrationErr.message);
         }
 
-        // Task Logs Table
         await sql(`CREATE TABLE IF NOT EXISTS task_logs (
             id SERIAL PRIMARY KEY,
             username VARCHAR(50) NOT NULL,
@@ -45,7 +45,6 @@ async function initDb() {
             timestamp VARCHAR(50) NOT NULL
         )`);
 
-        // CPA Configs Table
         await sql(`CREATE TABLE IF NOT EXISTS cpa_configs (
             id SERIAL PRIMARY KEY,
             network_name VARCHAR(100) NOT NULL,
@@ -56,7 +55,6 @@ async function initDb() {
             is_active INTEGER DEFAULT 1
         )`);
 
-        // System Settings Table
         await sql(`CREATE TABLE IF NOT EXISTS system_settings (
             key VARCHAR(100) PRIMARY KEY,
             value TEXT
@@ -65,13 +63,21 @@ async function initDb() {
         await sql(`INSERT INTO system_settings (key, value) VALUES ('global_earnings_percentage', '100') ON CONFLICT (key) DO NOTHING`);
         await sql(`INSERT INTO system_settings (key, value) VALUES ('google_sheet_config', '') ON CONFLICT (key) DO NOTHING`);
 
-        // Notifications Table
         await sql(`CREATE TABLE IF NOT EXISTS notifications (
             id SERIAL PRIMARY KEY,
             target_user VARCHAR(50) NOT NULL,
             message TEXT NOT NULL,
-            timestamp VARCHAR(50) NOT NULL
+            timestamp VARCHAR(50) NOT NULL,
+            is_read INTEGER DEFAULT 0
         )`);
+
+        // Fix: Auto-migrate is_read column for existing notifications table
+        try {
+            await sql(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read INTEGER DEFAULT 0`);
+            console.log("Notifications schema migrated successfully!");
+        } catch (migrationErr) {
+            console.log("Notifications migration note:", migrationErr.message);
+        }
 
         console.log("Neon Database Tables Initialized Successfully!");
     } catch (err) {
@@ -101,8 +107,3 @@ async function backupToGoogleSheet(username, email, balance, taskCount) {
     try {
         const config = JSON.parse(row.value); 
         if(!config.client_email || !config.private_key || !config.spreadsheet_id) return;
-
-        const auth = new google.auth.JWT(config.client_email, null, config.private_key.replace(/\\n/g, '\n'), ['https://www.googleapis.com/auth/spreadsheets']);
-        const sheets = google.sheets({ version: 'v4', auth });
-
-
