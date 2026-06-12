@@ -68,7 +68,7 @@ async function initDb() {
             is_read INTEGER DEFAULT 0
         )`);
 
-        // FIX: Auto-migrate is_read column for existing notifications table
+        // Fix: Auto-migrate is_read column for existing notifications table
         try {
             await sql(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read INTEGER DEFAULT 0`);
             console.log("Notifications schema migrated successfully!");
@@ -176,7 +176,7 @@ const htmlWrapper = (req, title, content) => {
         .logout-btn:hover{background:#cc3333;}
         
         .action-container-block { margin-top: 12px; display: flex; justify-content: flex-end; }
-        .remove-btn-styled { background:#ff4d4d; color:white; padding:6px 12px; font-size:12px; font-weight:bold; cursor:pointer; border-radius:4px; text-decoration:none; border:none; }
+        .remove-btn-styled { background:#ff4d4d; color:white; padding:8px 14px; font-size:12px; font-weight:bold; cursor:pointer; border-radius:4px; text-decoration:none; border:none; display:inline-block; margin-top:10px;}
         .remove-btn-styled:hover { background: #cc3333; }
 
         .galaxy-secure-node-wrapper { background: #111a24; padding: 20px; border-radius: 8px; border: 2px solid #45a29e; margin: 25px 0; box-sizing: border-box; text-align: center; box-shadow: 0px 4px 10px rgba(0,0,0,0.3); }
@@ -220,13 +220,27 @@ const htmlWrapper = (req, title, content) => {
         .notif-time { font-size: 11px; color: #888; display: block; margin-top: 5px; }
         .notif-btn { background: #45a29e; color: #0b0c10; font-size: 12px; font-weight: bold; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; width: auto; margin-top: 0; }
         .notif-btn:hover { background: #66fcf1; }
+
+        .search-container { margin-bottom: 15px; display: flex; gap: 10px; }
+        .search-input { flex: 1; padding: 10px; background: #0b0c10; color: #fff; border: 1px solid #45a29e; border-radius: 5px; }
+        .search-btn { width: auto; padding: 10px 20px; margin-top: 0; }
     </style>
     <script>
         function switchSection(sectionId) {
             document.querySelectorAll('.dashboard-section').forEach(s => s.classList.remove('active'));
             document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-            document.getElementById(sectionId).classList.add('active');
-            event.target.classList.add('active');
+            const targetSec = document.getElementById(sectionId);
+            if(targetSec) targetSec.classList.add('active');
+            if(event && event.target) event.target.classList.add('active');
+        }
+        // Keep active tab state on query string reload if possible
+        window.onload = function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if(urlParams.get('tab')) {
+                const tabName = urlParams.get('tab');
+                const btn = document.getElementById('btn-' + tabName);
+                if(btn) btn.click();
+            }
         }
     </script>
 </head><body><div class="container">
@@ -355,7 +369,9 @@ app.get('/dashboard', async (req, res) => {
                 let kw = searchKeyword.toLowerCase();
                 filteredUsers = users.filter(u => 
                     u.username.toLowerCase().includes(kw) || 
-                    u.email.toLowerCase().includes(kw)
+                    u.email.toLowerCase().includes(kw) ||
+                    (u.contact && u.contact.toLowerCase().includes(kw)) ||
+                    (u.address && u.address.toLowerCase().includes(kw))
                 );
             }
 
@@ -377,10 +393,50 @@ app.get('/dashboard', async (req, res) => {
                 });
             }
 
+            // 👥 ADVANCED WORKER METRICS AND AUDITING MODULE
             let usersHtml = `<h3>👥 Workers Metrics & Registration Database</h3>`;
-            filteredUsers.forEach(u => {
-                usersHtml += `<div class="user-row"><strong>👤 Username:</strong> ${u.username} | <strong>💰 Balance:</strong> $${parseFloat(u.balance_numeric || 0).toFixed(2)}</div>`;
-            });
+            usersHtml += `
+            <form method="GET" action="/dashboard" class="search-container">
+                <input type="hidden" name="tab" value="user-metrics">
+                <input type="text" name="search_keyword" value="${searchKeyword}" placeholder="Search via Username, Email, Phone, Address..." class="search-input">
+                <button type="submit" class="search-btn">Search Worker</button>
+            </form>`;
+
+            if(filteredUsers.length === 0) {
+                usersHtml += `<p style="color:#ff4d4d;">No matching workers found in registry.</p>`;
+            } else {
+                filteredUsers.forEach(u => {
+                    let userSpecificLogs = allLogs.filter(log => log.username === u.username);
+                    let taskBreakdownHtml = '';
+                    if(userSpecificLogs.length === 0) {
+                        taskBreakdownHtml = `<span style="color:#888; font-size:12px;">No historical activities tracked for this node.</span>`;
+                    } else {
+                        userSpecificLogs.forEach(lg => {
+                            let statusBadge = lg.status === 'Success' ? `<span class="badge-success">Success</span>` : (lg.status === 'Pending' ? `<span class="badge-pending">Pending</span>` : `<span class="badge-fail">Failed</span>`);
+                            taskBreakdownHtml += `<div style="font-size:12px; margin:4px 0; color:#b0b5bc;">• ${lg.task_name} -> Earned: <strong>$${parseFloat(lg.amount || 0).toFixed(2)}</strong> | ${statusBadge} <span style="font-size:11px; color:#666;">(${lg.timestamp})</span></div>`;
+                        });
+                    }
+
+                    usersHtml += `
+                    <div class="user-row" style="border-left-color: #66fcf1;">
+                        <div class="user-meta-block">
+                            <strong>👤 Username Account:</strong> <span style="color:#66fcf1; font-weight:bold;">${u.username}</span> <br>
+                            <strong>🔑 Account Password String:</strong> <span style="color:#aaa;">${u.password}</span> <br>
+                            <strong>📧 Registered Email:</strong> ${u.email} <br>
+                            <strong>📞 Contact Channel/WhatsApp:</strong> ${u.contact || 'N/A'} <br>
+                            <strong>🏠 Domestic physical Address:</strong> ${u.address || 'N/A'} <br>
+                            <strong>💰 Current Ledger Balance:</strong> <span style="color:#2ecc71; font-weight:bold;">$${parseFloat(u.balance_numeric || 0).toFixed(2)}</span>
+                        </div>
+                        <div class="user-history-block">
+                            <strong>🎯 Verification Log Tracks & Financial Breakdowns:</strong>
+                            <div style="margin-top:6px;">${taskBreakdownHtml}</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <a href="/remove-user?id=${u.id}" onclick="return confirm('Are you sure you want to permanently delete user ${u.username}? This wipe cannot be undone.');" class="remove-btn-styled">⚠️ DELETE WORKER ACCOUNT</a>
+                        </div>
+                    </div>`;
+                });
+            }
 
             let adminTaskSectionHtml = `<h3>🎯 Live Tasks Checker (Admin View)</h3>`;
             cpas.forEach(c => {
@@ -395,10 +451,10 @@ app.get('/dashboard', async (req, res) => {
             res.send(htmlWrapper(req, 'Admin Dashboard', `
                 <h3>Welcome Chief Admin</h3>
                 <div class="navbar">
-                    <button class="nav-tab active" onclick="switchSection('admin-panel')">⚙️ Controls Panel</button>
-                    <button class="nav-tab" onclick="switchSection('task-reviews')">📩 Task Submissions (${pendingSubmissions.length})</button>
-                    <button class="nav-tab" onclick="switchSection('user-metrics')">👥 Worker Metrics</button>
-                    <button class="nav-tab" onclick="switchSection('admin-tasks')">🎯 View Tasks</button>
+                    <button id="btn-admin-panel" class="nav-tab active" onclick="switchSection('admin-panel')">⚙️ Controls Panel</button>
+                    <button id="btn-task-reviews" class="nav-tab" onclick="switchSection('task-reviews')">📩 Task Submissions (${pendingSubmissions.length})</button>
+                    <button id="btn-user-metrics" class="nav-tab" onclick="switchSection('user-metrics')">👥 Worker Metrics</button>
+                    <button id="btn-admin-tasks" class="nav-tab" onclick="switchSection('admin-tasks')">🎯 View Tasks</button>
                 </div>
                 
                 <div id="admin-panel" class="dashboard-section active">
@@ -433,7 +489,7 @@ app.get('/dashboard', async (req, res) => {
             if (!userRow || userRow.length === 0) return res.redirect('/logout');
             const user = userRow[0];
             const cpas = await sql(`SELECT * FROM cpa_configs WHERE is_active = 1`);
-            const logs = await sql(`SELECT * FROM task_logs WHERE username = $1`, [username]);
+            const logs = await sql(`SELECT * FROM task_logs WHERE username = $1 ORDER BY id DESC`, [username]);
             const systemNotifs = await sql(`SELECT * FROM notifications WHERE target_user = $1 OR target_user = 'all' ORDER BY id DESC LIMIT 20`, [username]);
             
             const unreadCountRow = await sql(`SELECT COUNT(*) as unread FROM notifications WHERE (target_user = $1 OR target_user = 'all') AND is_read = 0`, [username]);
@@ -500,10 +556,26 @@ app.get('/dashboard', async (req, res) => {
                 });
             }
 
-            let logsHtml = `<h3>Interaction Logs</h3>`;
-            logs.forEach(l => {
-                logsHtml += `<div class="user-row">• <strong>${l.task_name}</strong> - ${l.status}</div>`;
-            });
+            // Fixed & Streamlined Interaction Logs View Area
+            let logsHtml = `<h3>📊 Interaction Logs & Tracking Reports</h3>`;
+            if (logs.length === 0) {
+                logsHtml += `<p style="color:#aaa;">No historical interaction traces found for your node account.</p>`;
+            } else {
+                logs.forEach(l => {
+                    let statusLabel = '';
+                    if(l.status === 'Success') statusLabel = `<span class="badge-success">Approved</span>`;
+                    else if(l.status === 'Pending') statusLabel = `<span class="badge-pending">Pending Audit</span>`;
+                    else statusLabel = `<span class="badge-fail">Rejected</span>`;
+                    
+                    logsHtml += `
+                    <div class="user-row" style="border-left-color: ${l.status==='Success'?'#45a29e':l.status==='Pending'?'#f0ad4e':'#ff4d4d'}">
+                        <strong>🎯 Task Container:</strong> ${l.task_name} <br>
+                        <strong>🔑 Proof Value Submitted:</strong> <span style="color:#66fcf1;">${l.proof_data}</span> <br>
+                        <strong>🕒 Timestamp Matrix:</strong> ${l.timestamp} <br>
+                        <strong>🚦 Current Pipeline Status:</strong> ${statusLabel} | <strong>💰 Value:</strong> $${parseFloat(l.amount || 0.50).toFixed(2)}
+                    </div>`;
+                });
+            }
 
             res.send(htmlWrapper(req, 'Worker Dashboard', `
                 <h3 style="margin-top:0;">Welcome System Worker, ${username}!</h3>
@@ -565,7 +637,7 @@ app.get('/approve-task', async (req, res) => {
             await sql(`INSERT INTO notifications (target_user, message, timestamp, is_read) VALUES ($1, $2, $3, 0)`, 
                        [task.username, `🎉 Congratulations! Your proof for the task [${task.task_name}] was approved. $${parseFloat(task.amount).toFixed(2)} has been successfully credited to your balance ledger.`, timeStr]);
         }
-        res.redirect('/dashboard');
+        res.redirect('/dashboard?tab=task-reviews');
     } catch(e) { res.redirect('/dashboard'); }
 });
 
@@ -583,7 +655,7 @@ app.get('/reject-task', async (req, res) => {
             await sql(`INSERT INTO notifications (target_user, message, timestamp, is_read) VALUES ($1, $2, $3, 0)`, 
                        [task.username, `❌ Access Verification Refused: Your proof submission for [${task.task_name}] was audited and rejected. Please re-submit valid info.`, timeStr]);
         }
-        res.redirect('/dashboard');
+        res.redirect('/dashboard?tab=task-reviews');
     } catch(e) { res.redirect('/dashboard'); }
 });
 
@@ -601,8 +673,15 @@ app.get('/remove-user', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const userId = parseInt(req.query.id);
     try {
+        // Find username before deletion to clear up metadata logs safely
+        const targetUsrRow = await sql(`SELECT username FROM users WHERE id = $1`, [userId]);
+        if(targetUsrRow.length > 0){
+            const tgtName = targetUsrRow[0].username;
+            await sql(`DELETE FROM task_logs WHERE username = $1`, [tgtName]);
+            await sql(`DELETE FROM notifications WHERE target_user = $1`, [tgtName]);
+        }
         await sql(`DELETE FROM users WHERE id = $1`, [userId]);
-        res.redirect('/dashboard');
+        res.redirect('/dashboard?tab=user-metrics');
     } catch(e) { res.redirect('/dashboard'); }
 });
 
@@ -621,7 +700,7 @@ app.get('/remove-cpa', async (req, res) => {
     const cpaId = parseInt(req.query.id);
     try {
         await sql(`DELETE FROM cpa_configs WHERE id = $1`, [cpaId]);
-        res.redirect('/dashboard');
+        res.redirect('/dashboard?tab=admin-tasks');
     } catch(e) { res.redirect('/dashboard'); }
 });
 
