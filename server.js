@@ -182,7 +182,7 @@ async function backupSheet(username, email, balance, taskCount) {
     } catch (e) { console.error("Sheet backup error:", e); }
 }
 
-// Generate Gmail Task Code (user permanent code)
+// Generate user initials
 function getUserInitials(username) {
     const parts = username.trim().split(' ');
     if (parts.length >= 2) {
@@ -192,22 +192,18 @@ function getUserInitials(username) {
     }
 }
 
+// Generate permanent Gmail task code
 async function generateUserCode(username, referredBy) {
     const initials = getUserInitials(username);
     if (!referredBy) {
-        // No referrer, first user in the whole system? We need a global sequential number.
-        // We'll use the count of users who have no referral code? Simpler: just generate HH-001 based on count of existing codes.
-        // To get a unique number, we could count all users with a referral_code (including those generated) + 1.
         const maxNum = await sql`SELECT MAX(CAST(SUBSTRING(referral_code FROM '([0-9]+)') AS INTEGER)) as max_val FROM users WHERE referral_code IS NOT NULL AND referral_code LIKE '%-%' AND referral_code NOT LIKE '%/%'`;
         const nextNum = (maxNum[0]?.max_val || 0) + 1;
         const code = initials + '-' + String(nextNum).padStart(3, '0');
         await sql`UPDATE users SET referral_code = ${code} WHERE username = ${username}`;
         return code;
     } else {
-        // Get referrer's code
         const refUser = await sql`SELECT referral_code FROM users WHERE username = ${referredBy}`;
         if (!refUser.length || !refUser[0].referral_code) {
-            // Fallback: treat as original
             const nextNum = (await sql`SELECT MAX(CAST(SUBSTRING(referral_code FROM '([0-9]+)') AS INTEGER)) as max_val FROM users WHERE referral_code IS NOT NULL AND referral_code NOT LIKE '%/%'`)[0]?.max_val || 0;
             const code = initials + '-' + String(nextNum + 1).padStart(3, '0');
             await sql`UPDATE users SET referral_code = ${code} WHERE username = ${username}`;
@@ -215,12 +211,10 @@ async function generateUserCode(username, referredBy) {
         }
         const refCode = refUser[0].referral_code;
         if (!refCode.includes('/')) {
-            // Direct referral from original user
             const newCode = refCode + '/' + initials;
             await sql`UPDATE users SET referral_code = ${newCode} WHERE username = ${username}`;
             return newCode;
         } else {
-            // Referral from a non-original user
             const dashIndex = refCode.indexOf('-');
             const slashIndex = refCode.indexOf('/');
             const numStr = refCode.substring(dashIndex + 1, slashIndex);
@@ -253,7 +247,8 @@ const translations = {
         done: "DONE", wrong: "WRONG", reason: "Reason", submitReason: "Send",
         paymentReady: "Pay Ready", totalGmails: "Total", pendingGmails: "Pending",
         approvedGmails: "Approved", rejectedGmails: "Rejected", search: "Search",
-        viewGmails: "📧 View Gmails", hideGmails: "Hide", deleteTask: "Delete"
+        viewGmails: "📧 View Gmails", hideGmails: "Hide", deleteTask: "Delete",
+        viewOtherTasks: "📋 Other Tasks", otherTasks: "Other Tasks"
     },
     si: {
         title: "GALAXY WORKERS", login: "සේවක ඇතුල්වීම", reg: "ලියාපදිංචිය",
@@ -271,7 +266,8 @@ const translations = {
         paymentProof: "ගෙවීම් සාක්ෂි", uploadProof: "Upload", done: "හරි", wrong: "වැරදි",
         reason: "හේතුව", submitReason: "යවන්න", paymentReady: "ගෙවීම් සූදානම්",
         totalGmails: "මුළු", pendingGmails: "පොරොත්තු", approvedGmails: "අනුමත", rejectedGmails: "ප්‍රතික්ෂේපිත",
-        search: "සොයන්න", viewGmails: "📧 Gmails බලන්න", hideGmails: "සඟවන්න", deleteTask: "මකන්න"
+        search: "සොයන්න", viewGmails: "📧 Gmails බලන්න", hideGmails: "සඟවන්න", deleteTask: "මකන්න",
+        viewOtherTasks: "📋 අනෙකුත් කාර්යයන්", otherTasks: "අනෙකුත් කාර්යයන්"
     },
     ta: {
         title: "GALAXY WORKERS", login: "உள்நுழைவு", reg: "பதிவு",
@@ -289,11 +285,12 @@ const translations = {
         paymentProof: "கட்டணச் சான்று", uploadProof: "பதிவேற்று", done: "சரி", wrong: "தவறு",
         reason: "காரணம்", submitReason: "அனுப்பு", paymentReady: "கட்டணம் தயார்",
         totalGmails: "மொத்தம்", pendingGmails: "நிலுவை", approvedGmails: "அனுமதி", rejectedGmails: "நிராகரி",
-        search: "தேடு", viewGmails: "📧 Gmails காண்க", hideGmails: "மறை", deleteTask: "நீக்கு"
+        search: "தேடு", viewGmails: "📧 Gmails காண்க", hideGmails: "மறை", deleteTask: "நீக்கு",
+        viewOtherTasks: "📋 மற்ற பணிகள்", otherTasks: "மற்ற பணிகள்"
     }
 };
 
-// HTML Wrapper (unchanged except small tweaks for new UI elements)
+// HTML Wrapper
 const htmlWrapper = (req, title, content) => {
     const lang = req.session.lang || 'en';
     const t = translations[lang];
@@ -328,7 +325,7 @@ const htmlWrapper = (req, title, content) => {
         .search-form{margin-bottom:15px;display:flex;gap:10px}
         .search-form input{flex:1}
         .search-form button{width:auto;margin:0}
-        .gmail-detail{font-size:12px;color:#aaa; margin-left:20px}
+        .toggle-btn{background:#45a29e;color:#000;padding:5px 10px;margin-right:5px;cursor:pointer;border:none;border-radius:4px;font-size:12px}
     </style>
     <script>
         function switchSection(id){
@@ -339,8 +336,11 @@ const htmlWrapper = (req, title, content) => {
         }
         function toggleGmails(uid){
             const div = document.getElementById('gmail-'+uid);
-            if(div.style.display==='none') div.style.display='block';
-            else div.style.display='none';
+            div.style.display = div.style.display==='none' ? 'block' : 'none';
+        }
+        function toggleOtherTasks(uid){
+            const div = document.getElementById('other-'+uid);
+            div.style.display = div.style.display==='none' ? 'block' : 'none';
         }
         function copyRefLink(){
             const inp = document.getElementById('refLinkInput');
@@ -505,7 +505,6 @@ app.get('/buyer-mark-done', async (req, res) => {
             const t = task[0];
             await sql`UPDATE gmail_tasks SET status='Success' WHERE id = ${req.query.id}`;
             await sql`UPDATE users SET balance_numeric = balance_numeric + ${t.amount} WHERE username = ${t.username}`;
-            // Referral commission (simplified)
             if (t.referral_commission_paid === 0) {
                 const user = await sql`SELECT referred_by FROM users WHERE username = ${t.username}`;
                 if (user.length && user[0].referred_by) {
@@ -596,7 +595,8 @@ app.get('/dashboard', async (req, res) => {
                 const k = kw.toLowerCase();
                 filteredUsers = users.filter(u => u.username.toLowerCase().includes(k) || u.email.toLowerCase().includes(k) || (u.contact||'').toLowerCase().includes(k) || (u.address||'').toLowerCase().includes(k));
             }
-            // Admin panel with tabbed sections
+
+            // Build admin panel
             res.send(htmlWrapper(req, 'Admin Dashboard', `
                 <h3>Welcome Chief Admin</h3>
                 <div class="navbar">
@@ -641,17 +641,26 @@ app.get('/dashboard', async (req, res) => {
                         <button>${t.search}</button>
                     </form>
                     ${filteredUsers.map(u => {
-                        const gmailCounts = allGmail.filter(g => g.username === u.username);
-                        const pendingG = gmailCounts.filter(g => g.status === 'Pending').length;
-                        const doneG = gmailCounts.filter(g => g.status === 'Success' || g.status === 'PaymentReady').length;
-                        const wrongG = gmailCounts.filter(g => g.status === 'Failed').length;
-                        const gmailDetails = gmailCounts.map(g => `<div style="margin:5px 0;font-size:12px">📧 ${g.email_created} (${g.task_code}) - ${g.status} $${g.amount}</div>`).join('');
+                        const userLogs = allLogs.filter(l => l.username === u.username);
+                        const userGmails = allGmail.filter(g => g.username === u.username);
+                        const pendingG = userGmails.filter(g => g.status === 'Pending').length;
+                        const doneG = userGmails.filter(g => g.status === 'Success' || g.status === 'PaymentReady').length;
+                        const wrongG = userGmails.filter(g => g.status === 'Failed').length;
+                        const totalTasks = userLogs.length;
+                        const earnedTasks = userLogs.filter(l => l.status === 'Success').length;
+                        const pendingTasks = userLogs.filter(l => l.status === 'Pending').length;
+
+                        const gmailDetails = userGmails.map(g => `<div style="margin:5px 0;font-size:12px">📧 ${g.email_created} (${g.task_code}) - ${g.status} $${g.amount}</div>`).join('') || 'No Gmails yet.';
+                        const otherTaskDetails = userLogs.map(l => `<div style="margin:5px 0;font-size:12px">• ${l.task_name} - ${l.status} $${l.amount} <small>(${l.timestamp})</small></div>`).join('') || 'No tasks yet.';
+
                         return `<div class="user-row">
                             <strong>👤 ${u.username}</strong> | 📧 ${u.email} | 📞 ${u.contact || 'N/A'}<br>
                             🏠 ${u.address || 'N/A'} | 🌍 ${u.country || 'LK'}<br>
                             💰 Balance: $${parseFloat(u.balance_numeric||0).toFixed(2)}<br>
-                            <button onclick="toggleGmails('${u.username}')" style="width:auto;background:#45a29e;color:#000;padding:5px 10px">📧 Gmails (${pendingG} pending, ${doneG} done, ${wrongG} wrong)</button>
-                            <div id="gmail-${u.username}" style="display:none; margin-top:10px">${gmailDetails || 'No Gmails yet.'}</div>
+                            <button class="toggle-btn" onclick="toggleGmails('${u.username}')">📧 Gmails (${pendingG} pend, ${doneG} done, ${wrongG} wrong)</button>
+                            <button class="toggle-btn" onclick="toggleOtherTasks('${u.username}')">📋 Other Tasks (${totalTasks} total, ${earnedTasks} earned, ${pendingTasks} pending)</button>
+                            <div id="gmail-${u.username}" style="display:none; margin-top:10px">${gmailDetails}</div>
+                            <div id="other-${u.username}" style="display:none; margin-top:10px">${otherTaskDetails}</div>
                             <a href="/remove-user?id=${u.id}" onclick="return confirm('Delete?')" class="logout-btn" style="display:inline-block;margin-top:10px">⚠️ Delete</a>
                         </div>`;
                     }).join('')}
@@ -697,7 +706,6 @@ app.get('/dashboard', async (req, res) => {
             const user = await sql`SELECT * FROM users WHERE username = ${username}`;
             if (!user.length) return res.redirect('/logout');
             const u = user[0];
-            // Ensure user has a code; generate if missing
             if (!u.referral_code) {
                 await generateUserCode(username, u.referred_by);
                 const updated = await sql`SELECT referral_code FROM users WHERE username = ${username}`;
