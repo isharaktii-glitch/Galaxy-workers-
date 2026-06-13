@@ -1,7 +1,7 @@
 {
   "name": "galaxy-workers-network",
-  "version": "1.1.0",
-  "description": "Galaxy Workers Network Platform with Gmail Tasks & Buyer Dashboard",
+  "version": "1.2.0",
+  "description": "Galaxy Workers Network with Gmail Tasks, Buyer Dashboard, Referral System",
   "main": "app.js",
   "scripts": {
     "start": "node app.js"
