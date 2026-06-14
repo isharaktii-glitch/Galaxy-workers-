@@ -2,46 +2,29 @@ const express = require('express');
 const session = require('express-session');
 const bodyParser = require('body-parser');
 const { neon } = require('@neondatabase/serverless');
-const multer = require('multer');
 
-// Database connection - fail gracefully if DATABASE_URL not set
+// Database Connection (Vercel env DATABASE_URL)
 let sql;
-try {
-  if (!process.env.DATABASE_URL) {
-    console.error("FATAL: DATABASE_URL is not defined in environment variables.");
-  } else {
-    sql = neon(process.env.DATABASE_URL);
-  }
-} catch (e) {
-  console.error("Failed to create database connection:", e);
+if (!process.env.DATABASE_URL) {
+  console.error("FATAL: DATABASE_URL environment variable not set.");
+} else {
+  sql = neon(process.env.DATABASE_URL);
 }
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
-
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+app.use(bodyParser.json({ limit: '10mb' }));
 app.use(session({ secret: 'galaxy-2026-secret', resave: false, saveUninitialized: true, cookie: { secure: false } }));
 
-// Middleware to check database readiness for all routes
+// Middleware to ensure DB connection exists before handling routes
 app.use((req, res, next) => {
   if (!sql) {
-    return res.status(500).send('Database connection not configured. Please set DATABASE_URL environment variable.');
+    return res.status(500).send('Database not configured. Set DATABASE_URL environment variable.');
   }
   next();
 });
 
-// Health check
-app.get('/api/health', async (_, res) => {
-  try {
-    await sql`SELECT 1`;
-    res.json({ status: 'ok' });
-  } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
-  }
-});
-
-// ========== DATABASE INITIALIZATION ==========
+// ========== DATABASE INIT ==========
 let dbReady = false;
 async function initDb() {
   await sql`CREATE TABLE IF NOT EXISTS users (
@@ -88,7 +71,6 @@ async function initDb() {
     id SERIAL PRIMARY KEY,
     buyer_username VARCHAR(50) NOT NULL,
     file_data TEXT,
-    original_name VARCHAR(255),
     timestamp VARCHAR(50) NOT NULL,
     is_deleted INTEGER DEFAULT 0
   )`;
@@ -100,7 +82,7 @@ async function initDb() {
     is_read INTEGER DEFAULT 0
   )`;
 
-  // Safe column additions (Neon/PostgreSQL 9.6+)
+  // Safe column additions
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS contact VARCHAR(20)`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_numeric NUMERIC(10,2) DEFAULT 0.0`;
@@ -111,42 +93,40 @@ async function initDb() {
   await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read INTEGER DEFAULT 0`;
 
   // Default settings
-  const settings = [
-    ['global_earnings_percentage', '100'],
-    ['google_sheet_config', ''],
-    ['gmail_task_price_lk', '0.25'],
-    ['gmail_task_price_intl', '0.25'],
-    ['gmail_task_instructions_en', 'Create a new Gmail account and submit credentials.'],
-    ['gmail_task_instructions_si', 'නව Gmail ගිණුමක් සාදා විස්තර ඇතුළත් කරන්න.'],
-    ['gmail_task_instructions_ta', 'புதிய Gmail கணக்கை உருவாக்கி விவரங்களைச் சமர்ப்பிக்கவும்.'],
-    ['referral_commission_tier1', '4'],
-    ['referral_commission_tier2', '5'],
-    ['referral_commission_tier3', '6'],
-    ['referral_commission_tier4', '7'],
-    ['referral_commission_tier5', '10'],
-    ['referral_commission_tier6', '15']
+  const sets = [
+    ['global_earnings_percentage','100'],
+    ['google_sheet_config',''],
+    ['gmail_task_price_lk','0.25'],
+    ['gmail_task_price_intl','0.25'],
+    ['gmail_task_instructions_en','Create a new Gmail account and submit credentials.'],
+    ['gmail_task_instructions_si','නව Gmail ගිණුමක් සාදා විස්තර ඇතුළත් කරන්න.'],
+    ['gmail_task_instructions_ta','புதிய Gmail கணக்கை உருவாக்கி விவரங்களைச் சமர்ப்பிக்கவும்.'],
+    ['referral_commission_tier1','4'],
+    ['referral_commission_tier2','5'],
+    ['referral_commission_tier3','6'],
+    ['referral_commission_tier4','7'],
+    ['referral_commission_tier5','10'],
+    ['referral_commission_tier6','15']
   ];
-  for (const [key, value] of settings) {
-    await sql`INSERT INTO system_settings (key, value) VALUES (${key}, ${value}) ON CONFLICT (key) DO NOTHING`;
+  for (const [k,v] of sets) {
+    await sql`INSERT INTO system_settings (key, value) VALUES (${k}, ${v}) ON CONFLICT (key) DO NOTHING`;
   }
 
-  // Default buyer account
   const buyer = await sql`SELECT id FROM users WHERE username = 'buyer'`;
   if (!buyer.length) {
     await sql`INSERT INTO users (username, password, email, address, contact, balance_numeric) VALUES ('buyer', 'buyer123', 'buyer@galaxy.com', 'Buyer', '000', 0)`;
   }
+  console.log('Database ready');
 }
 
-// Run DB init once
 app.use(async (req, res, next) => {
-  if (!dbReady && sql) {
+  if (!dbReady) {
     try {
       await initDb();
       dbReady = true;
-      console.log("Database initialized successfully.");
     } catch (e) {
-      console.error("Database initialization failed:", e);
-      return res.status(500).send("Database initialization error. Please check your DATABASE_URL.");
+      console.error('DB init error:', e);
+      return res.status(500).send("Database error. Please check DATABASE_URL.");
     }
   }
   next();
@@ -166,16 +146,16 @@ function getInitials(username) {
 async function generateUserCode(username, referredBy) {
   const initials = getInitials(username);
   if (!referredBy) {
-    const count = await sql`SELECT COUNT(*) as c FROM users WHERE referral_code IS NOT NULL AND referral_code LIKE '%-%' AND referral_code NOT LIKE '%/%'`;
-    const next = parseInt(count[0].c) + 1;
+    const cnt = await sql`SELECT COUNT(*) as c FROM users WHERE referral_code LIKE '%-%' AND referral_code NOT LIKE '%/%'`;
+    const next = parseInt(cnt[0].c) + 1;
     const code = initials + '-' + String(next).padStart(3, '0');
     await sql`UPDATE users SET referral_code = ${code} WHERE username = ${username}`;
     return code;
   } else {
     const refUser = await sql`SELECT referral_code FROM users WHERE username = ${referredBy}`;
     if (!refUser.length || !refUser[0].referral_code) {
-      const count = await sql`SELECT COUNT(*) as c FROM users WHERE referral_code IS NOT NULL AND referral_code LIKE '%-%' AND referral_code NOT LIKE '%/%'`;
-      const next = parseInt(count[0].c) + 1;
+      const cnt = await sql`SELECT COUNT(*) as c FROM users WHERE referral_code LIKE '%-%' AND referral_code NOT LIKE '%/%'`;
+      const next = parseInt(cnt[0].c) + 1;
       const code = initials + '-' + String(next).padStart(3, '0');
       await sql`UPDATE users SET referral_code = ${code} WHERE username = ${username}`;
       return code;
@@ -200,34 +180,34 @@ async function generateUserCode(username, referredBy) {
 // ========== TRANSLATIONS ==========
 const t = {
   en: {
-    title: "GALAXY WORKERS", login: "Login", reg: "Register",
-    user: "Username", pass: "Password", email: "Email",
-    btnLog: "LOG IN", btnReg: "REGISTER", logout: "Logout",
-    welcome: "Welcome", total: "Balance", tasks: "Tasks",
-    gmailTask: "📧 Gmail Task", gmailInstr: "Create a Gmail & submit.",
-    emailCreated: "Email", emailPass: "Password",
-    submitGmail: "Submit", yourCode: "Your Code",
-    getRefLink: "Referral Link", refLink: "Your Link", copyRef: "Copy",
-    gmailHistory: "Gmail History", buyerWelcome: "Welcome Buyer",
-    allPaymentsDone: "ALL PAID", paymentProof: "Payment Proof", uploadProof: "Upload",
-    done: "DONE", wrong: "WRONG", reason: "Reason",
-    paymentReady: "Pay Ready", search: "Search",
-    viewGmails: "📧 Gmails", viewOtherTasks: "📋 Other Tasks", deleteTask: "Delete"
+    title:"GALAXY WORKERS", login:"Login", reg:"Register",
+    user:"Username", pass:"Password", email:"Email",
+    btnLog:"LOG IN", btnReg:"REGISTER", logout:"Logout",
+    welcome:"Welcome", total:"Balance", tasks:"Tasks",
+    gmailTask:"📧 Gmail Task", gmailInstr:"Create a Gmail & submit.",
+    emailCreated:"Email", emailPass:"Password",
+    submitGmail:"Submit", yourCode:"Your Code",
+    getRefLink:"Referral Link", refLink:"Your Link", copyRef:"Copy",
+    gmailHistory:"Gmail History", buyerWelcome:"Welcome Buyer",
+    allPaymentsDone:"ALL PAID", paymentProof:"Proof (base64)", uploadProof:"Upload",
+    done:"DONE", wrong:"WRONG", reason:"Reason",
+    paymentReady:"Pay Ready", search:"Search",
+    viewGmails:"📧 Gmails", viewOtherTasks:"📋 Tasks", deleteTask:"Delete"
   },
   si: {
-    title: "GALAXY WORKERS", login: "ඇතුල්වීම", reg: "ලියාපදිංචිය",
-    user: "පරිශීලක", pass: "මුරපදය", email: "ඊමේල්",
-    btnLog: "ඇතුල් වන්න", btnReg: "ලියාපදිංචි", logout: "ඉවත් වන්න",
-    welcome: "ආයුබෝවන්", total: "ශේෂය", tasks: "කාර්යයන්",
-    gmailTask: "📧 Gmail", gmailInstr: "Gmail ගිණුමක් සාදන්න.",
-    emailCreated: "ඊමේල්", emailPass: "මුරපදය",
-    submitGmail: "යොමු කරන්න", yourCode: "ඔබේ කේතය",
-    getRefLink: "Referral Link", refLink: "ඔබේ Link", copyRef: "Copy",
-    gmailHistory: "Gmail ඉතිහාසය", buyerWelcome: "ආයුබෝවන්",
-    allPaymentsDone: "සියලු ගෙවීම්", paymentProof: "ගෙවීම් සාක්ෂි", uploadProof: "උඩුගත",
-    done: "හරි", wrong: "වැරදි", reason: "හේතුව",
-    paymentReady: "ගෙවීම් සූදානම්", search: "සොයන්න",
-    viewGmails: "📧 Gmails", viewOtherTasks: "📋 වෙනත්", deleteTask: "මකන්න"
+    title:"GALAXY WORKERS", login:"ඇතුල්වීම", reg:"ලියාපදිංචිය",
+    user:"පරිශීලක", pass:"මුරපදය", email:"ඊමේල්",
+    btnLog:"ඇතුල් වන්න", btnReg:"ලියාපදිංචි", logout:"ඉවත් වන්න",
+    welcome:"ආයුබෝවන්", total:"ශේෂය", tasks:"කාර්යයන්",
+    gmailTask:"📧 Gmail", gmailInstr:"Gmail ගිණුමක් සාදන්න.",
+    emailCreated:"ඊමේල්", emailPass:"මුරපදය",
+    submitGmail:"යොමු කරන්න", yourCode:"ඔබේ කේතය",
+    getRefLink:"Referral Link", refLink:"Link", copyRef:"Copy",
+    gmailHistory:"Gmail ඉතිහාසය", buyerWelcome:"ආයුබෝවන්",
+    allPaymentsDone:"සියලු ගෙවීම්", paymentProof:"ගෙවීම් සාක්ෂි (base64)", uploadProof:"උඩුගත",
+    done:"හරි", wrong:"වැරදි", reason:"හේතුව",
+    paymentReady:"ගෙවීම් සූදානම්", search:"සොයන්න",
+    viewGmails:"📧 Gmails", viewOtherTasks:"📋 වෙනත්", deleteTask:"මකන්න"
   }
 };
 
@@ -236,7 +216,7 @@ const htmlWrap = (req, title, content) => {
   const tr = t[lang];
   return `<!DOCTYPE html><html lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${title}</title>
   <style>
-    body{background:#0b0c10;color:#c5c6c7;font-family:sans-serif;padding:15px;margin:0}
+    body{background:#0b0c10;color:#c5c6c7;font-family:sans-serif;padding:15px}
     .container{max-width:1000px;margin:20px auto;background:#1f2833;padding:20px;border-radius:10px;border:1px solid #45a29e}
     .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:1px solid #45a29e;padding-bottom:15px}
     .header h2{color:#66fcf1;margin:0}
@@ -297,7 +277,7 @@ app.get('/change-lang', (req, res) => {
   res.redirect(req.get('referer') || '/');
 });
 
-// ========== AUTH ROUTES ==========
+// ========== AUTH ==========
 app.get('/', (req, res) => {
   if (req.session.user) return req.session.user === 'buyer' ? res.redirect('/buyer-dashboard') : res.redirect('/dashboard');
   const tr = t[req.session.lang||'en'];
@@ -378,8 +358,12 @@ app.get('/buyer-dashboard', async (req, res) => {
       }
     }
 
-    let proofHtml = `<h3>${tr.paymentProof}</h3><form action="/upload-payment-proof" method="POST" enctype="multipart/form-data"><input type="file" name="payment_proof" required><button>${tr.uploadProof}</button></form>`;
-    if (proofs.length) proofHtml += proofs.map(p => `<div><img src="/proof-image/${p.id}" style="max-width:200px"><p>${p.timestamp}</p><a href="/delete-payment-proof?id=${p.id}">Delete</a></div>`).join('');
+    let proofHtml = `<h3>${tr.paymentProof}</h3>
+    <form action="/upload-payment-proof" method="POST">
+      <textarea name="image_base64" placeholder="Paste base64 image data here..." required style="height:100px"></textarea>
+      <button>${tr.uploadProof}</button>
+    </form>`;
+    if (proofs.length) proofHtml += proofs.map(p => `<div><img src="data:image/png;base64,${p.file_data}" style="max-width:200px"><p>${p.timestamp}</p><a href="/delete-payment-proof?id=${p.id}">Delete</a></div>`).join('');
     else proofHtml += '<p>No proofs.</p>';
 
     res.send(htmlWrap(req, 'Buyer', `<h3>${tr.buyerWelcome}</h3><form action="/buyer-all-payments-done" method="POST"><button class="payment-ready-btn">💰 ${tr.allPaymentsDone}</button></form>${proofHtml}${tasksHtml}`));
@@ -437,23 +421,20 @@ app.post('/buyer-all-payments-done', async (req, res) => {
   res.send("<script>alert('Done!'); location.href='/buyer-dashboard'</script>");
 });
 
-app.post('/upload-payment-proof', upload.single('payment_proof'), async (req, res) => {
-  if (req.session.user !== 'buyer' || !req.file) return res.redirect('/buyer-dashboard');
+app.post('/upload-payment-proof', async (req, res) => {
+  if (req.session.user !== 'buyer') return res.redirect('/');
+  const { image_base64 } = req.body;
+  if (!image_base64) return res.redirect('/buyer-dashboard');
   try {
-    const b64 = req.file.buffer.toString('base64');
-    await sql`INSERT INTO payment_proofs (buyer_username, file_data, original_name, timestamp) VALUES ('buyer', ${b64}, ${req.file.originalname}, ${new Date().toLocaleString()})`;
+    await sql`INSERT INTO payment_proofs (buyer_username, file_data, timestamp) VALUES ('buyer', ${image_base64}, ${new Date().toLocaleString()})`;
     res.redirect('/buyer-dashboard');
   } catch (e) { res.redirect('/buyer-dashboard'); }
 });
 
-app.get('/proof-image/:id', async (req, res) => {
-  try {
-    const rows = await sql`SELECT file_data FROM payment_proofs WHERE id = ${req.params.id}`;
-    if (rows.length && rows[0].file_data) {
-      res.writeHead(200, { 'Content-Type': 'image/png' });
-      res.end(Buffer.from(rows[0].file_data, 'base64'));
-    } else res.status(404).send('Not found');
-  } catch (e) { res.status(500).send('Error'); }
+app.get('/delete-payment-proof', async (req, res) => {
+  if (!['buyer','admin'].includes(req.session.user)) return res.redirect('/');
+  await sql`UPDATE payment_proofs SET is_deleted=1 WHERE id = ${req.query.id}`;
+  res.redirect(req.session.user === 'admin' ? '/dashboard?tab=proofs' : '/buyer-dashboard');
 });
 
 // ========== WORKER & ADMIN DASHBOARD ==========
@@ -499,11 +480,10 @@ app.get('/dashboard', async (req, res) => {
       <div id="reviews" class="dashboard-section">${pend.map(l => `<div class="user-row">${l.username} - ${l.task_name} <a href="/approve-task?id=${l.id}">Approve</a> <a href="/reject-task?id=${l.id}">Reject</a></div>`).join('') || '<p>No pending</p>'}</div>
       <div id="users" class="dashboard-section">${userHtml}</div>
       <div id="gmails" class="dashboard-section">${allGmail.map(g => `<div>${g.username}: ${g.email_created} (${g.task_code}) - ${g.status}</div>`).join('')}</div>
-      <div id="proofs" class="dashboard-section">${allProofs.map(p => `<div><img src="/proof-image/${p.id}" style="max-width:200px"><p>${p.timestamp}</p><a href="/delete-payment-proof?id=${p.id}">Delete</a></div>`).join('')}</div>
+      <div id="proofs" class="dashboard-section">${allProofs.map(p => `<div><img src="data:image/png;base64,${p.file_data}" style="max-width:200px"><p>${p.timestamp}</p><a href="/delete-payment-proof?id=${p.id}">Delete</a></div>`).join('')}</div>
       <div id="gsettings" class="dashboard-section"><h3>Gmail Settings</h3><form action="/update-gmail-settings" method="POST"><label>Price LK:</label><input name="gmail_price_lk" value="${await getSetting('gmail_task_price_lk')||'0.25'}"><label>Price INTL:</label><input name="gmail_price_intl" value="${await getSetting('gmail_task_price_intl')||'0.25'}"><label>EN:</label><textarea name="instructions_en">${await getSetting('gmail_task_instructions_en')||''}</textarea><label>SI:</label><textarea name="instructions_si">${await getSetting('gmail_task_instructions_si')||''}</textarea><button>Update</button></form></div>
       <div id="rsettings" class="dashboard-section"><h3>Referral</h3><form action="/update-referral-settings" method="POST">${[1,2,3,4,5,6].map(i => `<label>Tier ${i}:</label><input name="tier${i}" value="${await getSetting('referral_commission_tier'+i)||[4,5,6,7,10,15][i-1]}">`).join('')}<button>Update</button></form></div>`));
     } else {
-      // Worker
       const user = await sql`SELECT * FROM users WHERE username = ${username}`;
       if (!user.length) return res.redirect('/logout');
       const u = user[0];
@@ -535,7 +515,7 @@ app.get('/dashboard', async (req, res) => {
         <button class="nav-tab" onclick="switchSection('wlogs')">📊</button>
       </div>
       <div id="wtasks" class="dashboard-section active">${cpas.map(c => `<div class="user-row"><strong>${c.network_name}</strong><br>${lang==='si'?c.instructions_si:c.instructions_en}<br><a href="${c.embed_code}" target="_blank">⚡ START</a></div>`).join('')}<h4>Submit Proof</h4><form action="/submit-task-proof" method="POST"><input name="task_name" placeholder="Task name"><input name="proof_data" placeholder="Proof"><button>Submit</button></form></div>
-      <div id="wgmail" class="dashboard-section"><h3>${tr.gmailTask}</h3><p>${instr}</p><p><strong>${tr.gmailPrice}:</strong> $${gPrice.toFixed(2)}</p><p><strong>${tr.yourCode}:</strong> ${u.referral_code}</p><form action="/submit-gmail-task" method="POST"><input type="email" name="email_created" placeholder="${tr.emailCreated}" required><input name="password_created" placeholder="${tr.emailPass}" required><button>${tr.submitGmail}</button></form><button onclick="document.getElementById('refSec').style.display='block';this.style.display='none'" style="background:#f39c12;color:#fff;margin-top:10px">${tr.getRefLink}</button><div id="refSec" style="display:none"><input id="refLinkInput" value="https://${req.get('host')}/register?ref=${u.referral_code}" readonly><button onclick="copyRef()">${tr.copyRef}</button></div></div>
+      <div id="wgmail" class="dashboard-section"><h3>${tr.gmailTask}</h3><p>${instr}</p><p><strong>Price:</strong> $${gPrice.toFixed(2)}</p><p><strong>${tr.yourCode}:</strong> ${u.referral_code}</p><form action="/submit-gmail-task" method="POST"><input type="email" name="email_created" placeholder="${tr.emailCreated}" required><input name="password_created" placeholder="${tr.emailPass}" required><button>${tr.submitGmail}</button></form><button onclick="document.getElementById('refSec').style.display='block';this.style.display='none'" style="background:#f39c12;color:#fff;margin-top:10px">${tr.getRefLink}</button><div id="refSec" style="display:none"><input id="refLinkInput" value="https://${req.get('host')}/register?ref=${u.referral_code}" readonly><button onclick="copyRef()">${tr.copyRef}</button></div></div>
       <div id="wghist" class="dashboard-section">${ghist}</div>
       <div id="wrefs" class="dashboard-section">${(await sql`SELECT * FROM users WHERE referred_by = ${username}`).map(r => `<div>👤 ${r.username} (${r.referral_code||'N/A'})</div>`).join('') || '<p>No referrals</p>'}</div>
       <div id="wnotifs" class="dashboard-section">${notifs.map(n => `<div class="user-row">${n.message} <small>${n.timestamp}</small> ${n.is_read? '':'<a href="/mark-notif-read?id='+n.id+'">Read</a>'}</div>`).join('')}</div>
@@ -642,5 +622,6 @@ app.post('/update-referral-settings', async (req, res) => {
 module.exports = app;
 
 if (process.env.NODE_ENV !== 'production') {
-  app.listen(process.env.PORT || 3000, () => console.log('Server running on port', process.env.PORT || 3000));
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => console.log('Server running on port ' + PORT));
 }
