@@ -3,82 +3,70 @@ const session = require('express-session');
 const bodyParser = require('body-parser');
 const { neon } = require('@neondatabase/serverless');
 
-// Database Connection (Vercel env DATABASE_URL)
-let sql;
-if (!process.env.DATABASE_URL) {
-  console.error("FATAL: DATABASE_URL environment variable not set.");
-} else {
-  sql = neon(process.env.DATABASE_URL);
+// Database connection wrapper (safe)
+let sql = null;
+try {
+  if (process.env.DATABASE_URL) {
+    sql = neon(process.env.DATABASE_URL);
+  }
+} catch (e) {
+  console.error("Failed to create DB connection:", e);
 }
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 app.use(bodyParser.json({ limit: '10mb' }));
-app.use(session({ secret: 'galaxy-2026-secret', resave: false, saveUninitialized: true, cookie: { secure: false } }));
+app.use(session({
+  secret: 'galaxy-2026-secret',
+  resave: false,
+  saveUninitialized: true,
+  cookie: { secure: false }
+}));
 
-// Middleware to ensure DB connection exists before handling routes
+// Middleware: block all routes if DB not ready
 app.use((req, res, next) => {
   if (!sql) {
-    return res.status(500).send('Database not configured. Set DATABASE_URL environment variable.');
+    return res.status(500).send('Database not configured. Please set DATABASE_URL in Vercel environment variables.');
   }
   next();
 });
 
-// ========== DATABASE INIT ==========
+// Database initialization (one-time)
 let dbReady = false;
 async function initDb() {
+  // Tables
   await sql`CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    password VARCHAR(50) NOT NULL,
-    email VARCHAR(100) NOT NULL
+    id SERIAL PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL,
+    password VARCHAR(50) NOT NULL, email VARCHAR(100) NOT NULL
   )`;
   await sql`CREATE TABLE IF NOT EXISTS task_logs (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(50) NOT NULL,
-    task_name VARCHAR(100) NOT NULL,
-    proof_data TEXT,
-    amount NUMERIC(10,2) DEFAULT 0.50,
-    status VARCHAR(20) NOT NULL,
+    id SERIAL PRIMARY KEY, username VARCHAR(50) NOT NULL,
+    task_name VARCHAR(100) NOT NULL, proof_data TEXT,
+    amount NUMERIC(10,2) DEFAULT 0.50, status VARCHAR(20) NOT NULL,
     timestamp VARCHAR(50) NOT NULL
   )`;
   await sql`CREATE TABLE IF NOT EXISTS cpa_configs (
-    id SERIAL PRIMARY KEY,
-    network_name VARCHAR(100) NOT NULL,
-    embed_code TEXT NOT NULL,
-    instructions_en TEXT,
-    instructions_si TEXT,
-    instructions_ta TEXT,
-    is_active INTEGER DEFAULT 1
+    id SERIAL PRIMARY KEY, network_name VARCHAR(100) NOT NULL,
+    embed_code TEXT NOT NULL, instructions_en TEXT,
+    instructions_si TEXT, instructions_ta TEXT, is_active INTEGER DEFAULT 1
   )`;
   await sql`CREATE TABLE IF NOT EXISTS system_settings (
-    key VARCHAR(100) PRIMARY KEY,
-    value TEXT
+    key VARCHAR(100) PRIMARY KEY, value TEXT
   )`;
   await sql`CREATE TABLE IF NOT EXISTS gmail_tasks (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(50) NOT NULL,
-    email_created VARCHAR(100) NOT NULL,
-    password_created VARCHAR(50) NOT NULL,
-    task_code VARCHAR(50) NOT NULL,
-    status VARCHAR(20) DEFAULT 'Pending',
-    amount NUMERIC(10,2) DEFAULT 0.25,
-    referral_commission_paid INTEGER DEFAULT 0,
-    buyer_reason TEXT,
-    timestamp VARCHAR(50) NOT NULL
+    id SERIAL PRIMARY KEY, username VARCHAR(50) NOT NULL,
+    email_created VARCHAR(100) NOT NULL, password_created VARCHAR(50) NOT NULL,
+    task_code VARCHAR(50) NOT NULL, status VARCHAR(20) DEFAULT 'Pending',
+    amount NUMERIC(10,2) DEFAULT 0.25, referral_commission_paid INTEGER DEFAULT 0,
+    buyer_reason TEXT, timestamp VARCHAR(50) NOT NULL
   )`;
   await sql`CREATE TABLE IF NOT EXISTS payment_proofs (
-    id SERIAL PRIMARY KEY,
-    buyer_username VARCHAR(50) NOT NULL,
-    file_data TEXT,
-    timestamp VARCHAR(50) NOT NULL,
-    is_deleted INTEGER DEFAULT 0
+    id SERIAL PRIMARY KEY, buyer_username VARCHAR(50) NOT NULL,
+    file_data TEXT, timestamp VARCHAR(50) NOT NULL, is_deleted INTEGER DEFAULT 0
   )`;
   await sql`CREATE TABLE IF NOT EXISTS notifications (
-    id SERIAL PRIMARY KEY,
-    target_user VARCHAR(50) NOT NULL,
-    message TEXT NOT NULL,
-    timestamp VARCHAR(50) NOT NULL,
+    id SERIAL PRIMARY KEY, target_user VARCHAR(50) NOT NULL,
+    message TEXT NOT NULL, timestamp VARCHAR(50) NOT NULL,
     is_read INTEGER DEFAULT 0
   )`;
 
@@ -95,28 +83,25 @@ async function initDb() {
   // Default settings
   const sets = [
     ['global_earnings_percentage','100'],
-    ['google_sheet_config',''],
     ['gmail_task_price_lk','0.25'],
     ['gmail_task_price_intl','0.25'],
     ['gmail_task_instructions_en','Create a new Gmail account and submit credentials.'],
     ['gmail_task_instructions_si','නව Gmail ගිණුමක් සාදා විස්තර ඇතුළත් කරන්න.'],
     ['gmail_task_instructions_ta','புதிய Gmail கணக்கை உருவாக்கி விவரங்களைச் சமர்ப்பிக்கவும்.'],
-    ['referral_commission_tier1','4'],
-    ['referral_commission_tier2','5'],
-    ['referral_commission_tier3','6'],
-    ['referral_commission_tier4','7'],
-    ['referral_commission_tier5','10'],
-    ['referral_commission_tier6','15']
+    ['referral_commission_tier1','4'],['referral_commission_tier2','5'],
+    ['referral_commission_tier3','6'],['referral_commission_tier4','7'],
+    ['referral_commission_tier5','10'],['referral_commission_tier6','15']
   ];
   for (const [k,v] of sets) {
     await sql`INSERT INTO system_settings (key, value) VALUES (${k}, ${v}) ON CONFLICT (key) DO NOTHING`;
   }
 
+  // Default buyer
   const buyer = await sql`SELECT id FROM users WHERE username = 'buyer'`;
   if (!buyer.length) {
-    await sql`INSERT INTO users (username, password, email, address, contact, balance_numeric) VALUES ('buyer', 'buyer123', 'buyer@galaxy.com', 'Buyer', '000', 0)`;
+    await sql`INSERT INTO users (username, password, email, address, contact, balance_numeric)
+      VALUES ('buyer', 'buyer123', 'buyer@galaxy.com', 'Buyer', '000', 0)`;
   }
-  console.log('Database ready');
 }
 
 app.use(async (req, res, next) => {
@@ -125,24 +110,28 @@ app.use(async (req, res, next) => {
       await initDb();
       dbReady = true;
     } catch (e) {
-      console.error('DB init error:', e);
-      return res.status(500).send("Database error. Please check DATABASE_URL.");
+      console.error('DB Init Failed:', e);
+      return res.status(500).send('Database initialization error. Check your DATABASE_URL.');
     }
   }
   next();
 });
 
-// ========== HELPERS ==========
+// Helper: get setting
 async function getSetting(key) {
-  const rows = await sql`SELECT value FROM system_settings WHERE key = ${key}`;
-  return rows.length ? rows[0].value : null;
+  try {
+    const rows = await sql`SELECT value FROM system_settings WHERE key = ${key}`;
+    return rows.length ? rows[0].value : null;
+  } catch (e) { return null; }
 }
 
+// Helper: generate initials
 function getInitials(username) {
   const parts = username.trim().split(' ');
   return parts.length >= 2 ? (parts[0][0] + parts[1][0]).toUpperCase() : username.substring(0, 2).toUpperCase();
 }
 
+// Helper: generate referral code
 async function generateUserCode(username, referredBy) {
   const initials = getInitials(username);
   if (!referredBy) {
@@ -177,37 +166,31 @@ async function generateUserCode(username, referredBy) {
   }
 }
 
-// ========== TRANSLATIONS ==========
+// Translations
 const t = {
   en: {
     title:"GALAXY WORKERS", login:"Login", reg:"Register",
-    user:"Username", pass:"Password", email:"Email",
-    btnLog:"LOG IN", btnReg:"REGISTER", logout:"Logout",
-    welcome:"Welcome", total:"Balance", tasks:"Tasks",
+    user:"Username", pass:"Password", email:"Email", btnLog:"LOG IN", btnReg:"REGISTER",
+    logout:"Logout", welcome:"Welcome", total:"Balance", tasks:"Tasks",
     gmailTask:"📧 Gmail Task", gmailInstr:"Create a Gmail & submit.",
-    emailCreated:"Email", emailPass:"Password",
-    submitGmail:"Submit", yourCode:"Your Code",
-    getRefLink:"Referral Link", refLink:"Your Link", copyRef:"Copy",
+    emailCreated:"Email", emailPass:"Password", submitGmail:"Submit",
+    yourCode:"Your Code", getRefLink:"Referral Link", refLink:"Your Link", copyRef:"Copy",
     gmailHistory:"Gmail History", buyerWelcome:"Welcome Buyer",
     allPaymentsDone:"ALL PAID", paymentProof:"Proof (base64)", uploadProof:"Upload",
-    done:"DONE", wrong:"WRONG", reason:"Reason",
-    paymentReady:"Pay Ready", search:"Search",
-    viewGmails:"📧 Gmails", viewOtherTasks:"📋 Tasks", deleteTask:"Delete"
+    done:"DONE", wrong:"WRONG", reason:"Reason", paymentReady:"Pay Ready",
+    search:"Search", viewGmails:"📧 Gmails", viewOtherTasks:"📋 Tasks", deleteTask:"Delete"
   },
   si: {
     title:"GALAXY WORKERS", login:"ඇතුල්වීම", reg:"ලියාපදිංචිය",
-    user:"පරිශීලක", pass:"මුරපදය", email:"ඊමේල්",
-    btnLog:"ඇතුල් වන්න", btnReg:"ලියාපදිංචි", logout:"ඉවත් වන්න",
-    welcome:"ආයුබෝවන්", total:"ශේෂය", tasks:"කාර්යයන්",
+    user:"පරිශීලක", pass:"මුරපදය", email:"ඊමේල්", btnLog:"ඇතුල් වන්න", btnReg:"ලියාපදිංචි",
+    logout:"ඉවත් වන්න", welcome:"ආයුබෝවන්", total:"ශේෂය", tasks:"කාර්යයන්",
     gmailTask:"📧 Gmail", gmailInstr:"Gmail ගිණුමක් සාදන්න.",
-    emailCreated:"ඊමේල්", emailPass:"මුරපදය",
-    submitGmail:"යොමු කරන්න", yourCode:"ඔබේ කේතය",
-    getRefLink:"Referral Link", refLink:"Link", copyRef:"Copy",
+    emailCreated:"ඊමේල්", emailPass:"මුරපදය", submitGmail:"යොමු කරන්න",
+    yourCode:"ඔබේ කේතය", getRefLink:"Referral Link", refLink:"Link", copyRef:"Copy",
     gmailHistory:"Gmail ඉතිහාසය", buyerWelcome:"ආයුබෝවන්",
     allPaymentsDone:"සියලු ගෙවීම්", paymentProof:"ගෙවීම් සාක්ෂි (base64)", uploadProof:"උඩුගත",
-    done:"හරි", wrong:"වැරදි", reason:"හේතුව",
-    paymentReady:"ගෙවීම් සූදානම්", search:"සොයන්න",
-    viewGmails:"📧 Gmails", viewOtherTasks:"📋 වෙනත්", deleteTask:"මකන්න"
+    done:"හරි", wrong:"වැරදි", reason:"හේතුව", paymentReady:"ගෙවීම් සූදානම්",
+    search:"සොයන්න", viewGmails:"📧 Gmails", viewOtherTasks:"📋 වෙනත්", deleteTask:"මකන්න"
   }
 };
 
@@ -277,7 +260,7 @@ app.get('/change-lang', (req, res) => {
   res.redirect(req.get('referer') || '/');
 });
 
-// ========== AUTH ==========
+// Auth routes
 app.get('/', (req, res) => {
   if (req.session.user) return req.session.user === 'buyer' ? res.redirect('/buyer-dashboard') : res.redirect('/dashboard');
   const tr = t[req.session.lang||'en'];
@@ -320,7 +303,7 @@ app.post('/login', async (req, res) => {
 
 app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/'); });
 
-// ========== BUYER DASHBOARD ==========
+// Buyer Dashboard
 app.get('/buyer-dashboard', async (req, res) => {
   if (req.session.user !== 'buyer') return res.redirect('/');
   const tr = t[req.session.lang||'en'];
@@ -358,11 +341,7 @@ app.get('/buyer-dashboard', async (req, res) => {
       }
     }
 
-    let proofHtml = `<h3>${tr.paymentProof}</h3>
-    <form action="/upload-payment-proof" method="POST">
-      <textarea name="image_base64" placeholder="Paste base64 image data here..." required style="height:100px"></textarea>
-      <button>${tr.uploadProof}</button>
-    </form>`;
+    let proofHtml = `<h3>${tr.paymentProof}</h3><form action="/upload-payment-proof" method="POST"><textarea name="image_base64" placeholder="Paste base64 image data here..." required style="height:100px"></textarea><button>${tr.uploadProof}</button></form>`;
     if (proofs.length) proofHtml += proofs.map(p => `<div><img src="data:image/png;base64,${p.file_data}" style="max-width:200px"><p>${p.timestamp}</p><a href="/delete-payment-proof?id=${p.id}">Delete</a></div>`).join('');
     else proofHtml += '<p>No proofs.</p>';
 
@@ -422,13 +401,9 @@ app.post('/buyer-all-payments-done', async (req, res) => {
 });
 
 app.post('/upload-payment-proof', async (req, res) => {
-  if (req.session.user !== 'buyer') return res.redirect('/');
-  const { image_base64 } = req.body;
-  if (!image_base64) return res.redirect('/buyer-dashboard');
-  try {
-    await sql`INSERT INTO payment_proofs (buyer_username, file_data, timestamp) VALUES ('buyer', ${image_base64}, ${new Date().toLocaleString()})`;
-    res.redirect('/buyer-dashboard');
-  } catch (e) { res.redirect('/buyer-dashboard'); }
+  if (req.session.user !== 'buyer' || !req.body.image_base64) return res.redirect('/buyer-dashboard');
+  await sql`INSERT INTO payment_proofs (buyer_username, file_data, timestamp) VALUES ('buyer', ${req.body.image_base64}, ${new Date().toLocaleString()})`;
+  res.redirect('/buyer-dashboard');
 });
 
 app.get('/delete-payment-proof', async (req, res) => {
@@ -437,7 +412,7 @@ app.get('/delete-payment-proof', async (req, res) => {
   res.redirect(req.session.user === 'admin' ? '/dashboard?tab=proofs' : '/buyer-dashboard');
 });
 
-// ========== WORKER & ADMIN DASHBOARD ==========
+// Worker & Admin Dashboard
 app.get('/dashboard', async (req, res) => {
   if (!req.session.user) return res.redirect('/');
   const username = req.session.user;
@@ -524,7 +499,7 @@ app.get('/dashboard', async (req, res) => {
   } catch (e) { console.error(e); res.status(500).send('Dashboard error'); }
 });
 
-// Task submissions
+// Task actions
 app.post('/submit-gmail-task', async (req, res) => {
   if (!req.session.user || ['admin','buyer'].includes(req.session.user)) return res.redirect('/');
   const { email_created, password_created } = req.body;
@@ -621,6 +596,7 @@ app.post('/update-referral-settings', async (req, res) => {
 
 module.exports = app;
 
+// Local dev only (Vercel ignores)
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => console.log('Server running on port ' + PORT));
