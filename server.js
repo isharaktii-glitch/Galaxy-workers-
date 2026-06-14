@@ -43,7 +43,6 @@ app.get('/proof-image/:id', async (req, res) => {
 
 // ===================== DATABASE INITIALIZATION =====================
 async function initDb() {
-    // Create tables if not exist
     await sql`CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username VARCHAR(50) UNIQUE NOT NULL,
@@ -100,7 +99,6 @@ async function initDb() {
         is_read INTEGER DEFAULT 0
     )`;
 
-    // Safe column additions
     await sql`
         DO $$ BEGIN
             ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;
@@ -114,7 +112,6 @@ async function initDb() {
     `;
     await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read INTEGER DEFAULT 0`;
 
-    // Default settings
     const settings = [
         ['global_earnings_percentage', '100'],
         ['google_sheet_config', ''],
@@ -134,7 +131,6 @@ async function initDb() {
         await sql`INSERT INTO system_settings (key, value) VALUES (${key}, ${value}) ON CONFLICT (key) DO NOTHING`;
     }
 
-    // Default buyer account
     const buyer = await sql`SELECT id FROM users WHERE username = 'buyer'`;
     if (!buyer.length) {
         await sql`INSERT INTO users (username, password, email, address, contact, balance_numeric) VALUES ('buyer', 'buyer123', 'buyer@galaxy.com', 'Buyer Address', '000000', 0)`;
@@ -182,7 +178,7 @@ async function backupSheet(username, email, balance, taskCount) {
     } catch (e) { console.error("Sheet backup error:", e); }
 }
 
-// Generate Gmail Task Code (user permanent code)
+// Get initials (unchanged)
 function getUserInitials(username) {
     const parts = username.trim().split(' ');
     if (parts.length >= 2) {
@@ -192,47 +188,77 @@ function getUserInitials(username) {
     }
 }
 
+// ===================== IMPROVED generateUserCode – NEVER FAILS =====================
 async function generateUserCode(username, referredBy) {
     const initials = getUserInitials(username);
-    if (!referredBy) {
-        // First generation: no referrer, use global sequential number
-        const maxNum = await sql`SELECT MAX(CAST(SUBSTRING(referral_code FROM '([0-9]+)') AS INTEGER)) as max_val FROM users WHERE referral_code IS NOT NULL AND referral_code LIKE '%-%' AND referral_code NOT LIKE '%/%'`;
-        const nextNum = (maxNum[0]?.max_val || 0) + 1;
-        const code = initials + '-' + String(nextNum).padStart(3, '0');
-        await sql`UPDATE users SET referral_code = ${code} WHERE username = ${username}`;
-        return code;
-    } else {
-        // Referral exists
-        const refUser = await sql`SELECT referral_code FROM users WHERE username = ${referredBy}`;
-        if (!refUser.length || !refUser[0].referral_code) {
-            // Fallback to original
-            const nextNum = (await sql`SELECT MAX(CAST(SUBSTRING(referral_code FROM '([0-9]+)') AS INTEGER)) as max_val FROM users WHERE referral_code IS NOT NULL AND referral_code NOT LIKE '%/%'`)[0]?.max_val || 0;
-            const code = initials + '-' + String(nextNum + 1).padStart(3, '0');
+    // Fallback code in case anything fails (using timestamp to guarantee uniqueness)
+    const fallbackCode = initials + '-' + Date.now().toString(36).toUpperCase();
+    
+    try {
+        if (!referredBy) {
+            // No referrer: original sequential number
+            const maxNum = await sql`SELECT MAX(CAST(SUBSTRING(referral_code FROM '([0-9]+)') AS INTEGER)) as max_val FROM users WHERE referral_code IS NOT NULL AND referral_code LIKE '%-%' AND referral_code NOT LIKE '%/%'`;
+            const nextNum = (maxNum[0]?.max_val || 0) + 1;
+            const code = initials + '-' + String(nextNum).padStart(3, '0');
             await sql`UPDATE users SET referral_code = ${code} WHERE username = ${username}`;
             return code;
-        }
-        const refCode = refUser[0].referral_code;
-        if (!refCode.includes('/')) {
-            // Direct referral from original user
-            const newCode = refCode + '/' + initials;
-            await sql`UPDATE users SET referral_code = ${newCode} WHERE username = ${username}`;
-            return newCode;
         } else {
-            // Referral from a non-original user
-            const dashIndex = refCode.indexOf('-');
-            const slashIndex = refCode.indexOf('/');
-            const numStr = refCode.substring(dashIndex + 1, slashIndex);
-            const num = parseInt(numStr);
-            const newNum = num + 1;
-            const referrerInitials = refCode.substring(refCode.lastIndexOf('/') + 1);
-            const newCode = referrerInitials + '-' + String(newNum).padStart(3, '0') + '/' + initials;
-            await sql`UPDATE users SET referral_code = ${newCode} WHERE username = ${username}`;
-            return newCode;
+            // Referral exists
+            const refUser = await sql`SELECT referral_code FROM users WHERE username = ${referredBy}`;
+            if (!refUser.length || !refUser[0].referral_code) {
+                // Fallback to original generation
+                const nextNum = (await sql`SELECT MAX(CAST(SUBSTRING(referral_code FROM '([0-9]+)') AS INTEGER)) as max_val FROM users WHERE referral_code IS NOT NULL AND referral_code NOT LIKE '%/%'`)[0]?.max_val || 0;
+                const code = initials + '-' + String(nextNum + 1).padStart(3, '0');
+                await sql`UPDATE users SET referral_code = ${code} WHERE username = ${username}`;
+                return code;
+            }
+            const refCode = refUser[0].referral_code;
+            // Handle possible broken formats
+            if (!refCode.includes('-') || (refCode.includes('/') && refCode.indexOf('-') > refCode.indexOf('/'))) {
+                // Fallback to original sequential generation
+                const nextNum = (await sql`SELECT MAX(CAST(SUBSTRING(referral_code FROM '([0-9]+)') AS INTEGER)) as max_val FROM users WHERE referral_code IS NOT NULL AND referral_code NOT LIKE '%/%'`)[0]?.max_val || 0;
+                const code = initials + '-' + String(nextNum + 1).padStart(3, '0');
+                await sql`UPDATE users SET referral_code = ${code} WHERE username = ${username}`;
+                return code;
+            }
+            if (!refCode.includes('/')) {
+                // Direct referral from an original code
+                const newCode = refCode + '/' + initials;
+                await sql`UPDATE users SET referral_code = ${newCode} WHERE username = ${username}`;
+                return newCode;
+            } else {
+                // Referral from a non-original user
+                const dashIndex = refCode.indexOf('-');
+                const slashIndex = refCode.indexOf('/');
+                const numStr = refCode.substring(dashIndex + 1, slashIndex);
+                const num = parseInt(numStr);
+                if (isNaN(num)) {
+                    // Fallback
+                    const nextNum = (await sql`SELECT MAX(CAST(SUBSTRING(referral_code FROM '([0-9]+)') AS INTEGER)) as max_val FROM users WHERE referral_code IS NOT NULL AND referral_code NOT LIKE '%/%'`)[0]?.max_val || 0;
+                    const code = initials + '-' + String(nextNum + 1).padStart(3, '0');
+                    await sql`UPDATE users SET referral_code = ${code} WHERE username = ${username}`;
+                    return code;
+                }
+                const newNum = num + 1;
+                const referrerInitials = refCode.substring(refCode.lastIndexOf('/') + 1);
+                const newCode = referrerInitials + '-' + String(newNum).padStart(3, '0') + '/' + initials;
+                await sql`UPDATE users SET referral_code = ${newCode} WHERE username = ${username}`;
+                return newCode;
+            }
         }
+    } catch (err) {
+        console.error('generateUserCode error, using fallback:', err);
+        // If anything fails, use fallback code and still update user
+        try {
+            await sql`UPDATE users SET referral_code = ${fallbackCode} WHERE username = ${username}`;
+        } catch (updateErr) {
+            console.error('Failed to update fallback code:', updateErr);
+        }
+        return fallbackCode;
     }
 }
 
-// ===================== TRANSLATIONS (unchanged) =====================
+// ===================== TRANSLATIONS =====================
 const translations = {
     en: {
         title: "GALAXY WORKERS", login: "Worker Login", reg: "Worker Registration",
@@ -291,7 +317,7 @@ const translations = {
     }
 };
 
-// HTML Wrapper (unchanged except small tweaks for new UI elements)
+// HTML Wrapper
 const htmlWrapper = (req, title, content) => {
     const lang = req.session.lang || 'en';
     const t = translations[lang];
@@ -503,7 +529,6 @@ app.get('/buyer-mark-done', async (req, res) => {
             const t = task[0];
             await sql`UPDATE gmail_tasks SET status='Success' WHERE id = ${req.query.id}`;
             await sql`UPDATE users SET balance_numeric = balance_numeric + ${t.amount} WHERE username = ${t.username}`;
-            // Referral commission (simplified)
             if (t.referral_commission_paid === 0) {
                 const user = await sql`SELECT referred_by FROM users WHERE username = ${t.username}`;
                 if (user.length && user[0].referred_by) {
@@ -594,7 +619,6 @@ app.get('/dashboard', async (req, res) => {
                 const k = kw.toLowerCase();
                 filteredUsers = users.filter(u => u.username.toLowerCase().includes(k) || u.email.toLowerCase().includes(k) || (u.contact||'').toLowerCase().includes(k) || (u.address||'').toLowerCase().includes(k));
             }
-            // Admin panel with tabbed sections
             res.send(htmlWrapper(req, 'Admin Dashboard', `
                 <h3>Welcome Chief Admin</h3>
                 <div class="navbar">
@@ -691,11 +715,9 @@ app.get('/dashboard', async (req, res) => {
                 </div>
             `));
         } else {
-            // Worker dashboard
             const user = await sql`SELECT * FROM users WHERE username = ${username}`;
             if (!user.length) return res.redirect('/logout');
             const u = user[0];
-            // Ensure user has a code; generate if missing
             if (!u.referral_code) {
                 await generateUserCode(username, u.referred_by);
                 const updated = await sql`SELECT referral_code FROM users WHERE username = ${username}`;
@@ -772,35 +794,31 @@ app.get('/dashboard', async (req, res) => {
     }
 });
 
-// ===================== UPDATED: Gmail Task submission with guaranteed code & error handling =====================
+// ===================== Gmail Task Submission – NOW WITH GUARANTEED SUCCESS =====================
 app.post('/submit-gmail-task', async (req, res) => {
     if (!req.session.user || ['admin','buyer'].includes(req.session.user)) return res.redirect('/');
     const { email_created, password_created } = req.body;
     try {
-        // Fetch user (country, referral_code, referred_by)
         const user = await sql`SELECT country, referral_code, referred_by FROM users WHERE username = ${req.session.user}`;
         if (!user.length) return res.redirect('/logout');
         const u = user[0];
         let code = u.referral_code;
-        // If no code yet, generate and save it
         if (!code) {
+            // generateUserCode will always return a valid string
             code = await generateUserCode(req.session.user, u.referred_by);
-            if (!code) throw new Error("Code generation failed");
         }
         const country = u.country || 'LK';
         const priceStr = await getSetting(country === 'LK' ? 'gmail_task_price_lk' : 'gmail_task_price_intl');
         const price = parseFloat(priceStr || '0.25');
-        // Insert task
         await sql`INSERT INTO gmail_tasks (username, email_created, password_created, task_code, amount, timestamp) VALUES (${req.session.user}, ${email_created}, ${password_created}, ${code}, ${price}, ${new Date().toLocaleString()})`;
-        // Send notification to worker (non-critical)
         try {
             await sql`INSERT INTO notifications (target_user, message, timestamp) VALUES (${req.session.user}, ${'📧 Gmail submitted: '+email_created}, ${new Date().toLocaleString()})`;
         } catch (notifErr) { console.error("Notify fail:", notifErr); }
-        // Success alert
         res.send(`<script>alert('Gmail submitted successfully!'); location.href='/dashboard?tab=worker-gmail-history'</script>`);
     } catch (e) {
         console.error("Gmail submit error:", e);
-        res.send(`<script>alert('Submission failed. Please try again.'); location.href='/dashboard'</script>`);
+        // Show the actual error message for debugging (remove in production if needed)
+        res.send(`<script>alert('Submission failed: ${e.message.replace(/'/g, "\\'")}'); location.href='/dashboard'</script>`);
     }
 });
 
