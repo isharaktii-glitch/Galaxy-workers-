@@ -100,7 +100,7 @@ async function initDb() {
         is_read INTEGER DEFAULT 0
     )`;
 
-    // ===== NEW: ensure all required columns exist (safe fallback) =====
+    // Safe column additions (normal ones)
     await sql`ALTER TABLE gmail_tasks ADD COLUMN IF NOT EXISTS email_created VARCHAR(100)`;
     await sql`ALTER TABLE gmail_tasks ADD COLUMN IF NOT EXISTS password_created VARCHAR(50)`;
     await sql`ALTER TABLE gmail_tasks ADD COLUMN IF NOT EXISTS task_code VARCHAR(50)`;
@@ -110,7 +110,6 @@ async function initDb() {
     await sql`ALTER TABLE gmail_tasks ADD COLUMN IF NOT EXISTS buyer_reason TEXT`;
     await sql`ALTER TABLE gmail_tasks ADD COLUMN IF NOT EXISTS timestamp VARCHAR(50)`;
 
-    // Safe column additions for users and notifications
     await sql`
         DO $$ BEGIN
             ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;
@@ -320,7 +319,7 @@ const translations = {
     }
 };
 
-// HTML Wrapper
+// HTML Wrapper (unchanged)
 const htmlWrapper = (req, title, content) => {
     const lang = req.session.lang || 'en';
     const t = translations[lang];
@@ -797,7 +796,7 @@ app.get('/dashboard', async (req, res) => {
     }
 });
 
-// ===================== Gmail Task Submission (GUARANTEED) =====================
+// ===================== SELF-HEALING GMAIL SUBMISSION =====================
 app.post('/submit-gmail-task', async (req, res) => {
     if (!req.session.user || ['admin','buyer'].includes(req.session.user)) return res.redirect('/');
     const { email_created, password_created } = req.body;
@@ -812,14 +811,48 @@ app.post('/submit-gmail-task', async (req, res) => {
         const country = u.country || 'LK';
         const priceStr = await getSetting(country === 'LK' ? 'gmail_task_price_lk' : 'gmail_task_price_intl');
         const price = parseFloat(priceStr || '0.25');
+
+        // Insert attempt
         await sql`INSERT INTO gmail_tasks (username, email_created, password_created, task_code, amount, timestamp) VALUES (${req.session.user}, ${email_created}, ${password_created}, ${code}, ${price}, ${new Date().toLocaleString()})`;
+
+        // Notification
         try {
             await sql`INSERT INTO notifications (target_user, message, timestamp) VALUES (${req.session.user}, ${'📧 Gmail submitted: '+email_created}, ${new Date().toLocaleString()})`;
         } catch (notifErr) { console.error("Notify fail:", notifErr); }
+
         res.send(`<script>alert('Gmail submitted successfully!'); location.href='/dashboard?tab=worker-gmail-history'</script>`);
     } catch (e) {
-        console.error("Gmail submit error:", e);
-        res.send(`<script>alert('Submission failed. Please try again.'); location.href='/dashboard'</script>`);
+        console.error("Initial insert error:", e.message);
+        // If missing column, try to add it and retry
+        const msg = e.message || '';
+        const columnMatch = msg.match(/column\s+"?([^\s"]+)"?\s+of relation/i);
+        if (columnMatch) {
+            const missingCol = columnMatch[1].replace(/"/g, ''); // clean column name
+            try {
+                // Add the missing column (generic VARCHAR(255) fallback)
+                await sql.unsafe(`ALTER TABLE gmail_tasks ADD COLUMN IF NOT EXISTS "${missingCol}" VARCHAR(255)`);
+                // Retry insert
+                try {
+                    const user = await sql`SELECT country, referral_code, referred_by FROM users WHERE username = ${req.session.user}`;
+                    const u = user[0];
+                    let code = u.referral_code;
+                    if (!code) code = await generateUserCode(req.session.user, u.referred_by);
+                    const country = u.country || 'LK';
+                    const priceStr = await getSetting(country === 'LK' ? 'gmail_task_price_lk' : 'gmail_task_price_intl');
+                    const price = parseFloat(priceStr || '0.25');
+                    await sql`INSERT INTO gmail_tasks (username, email_created, password_created, task_code, amount, timestamp) VALUES (${req.session.user}, ${email_created}, ${password_created}, ${code}, ${price}, ${new Date().toLocaleString()})`;
+                    res.send(`<script>alert('Gmail submitted successfully!'); location.href='/dashboard?tab=worker-gmail-history'</script>`);
+                } catch (retryErr) {
+                    console.error("Retry failed:", retryErr);
+                    res.send(`<script>alert('Submission failed after fix attempt. Please contact admin.'); location.href='/dashboard'</script>`);
+                }
+            } catch (alterErr) {
+                console.error("Alter failed:", alterErr);
+                res.send(`<script>alert('Submission failed. Could not fix column.'); location.href='/dashboard'</script>`);
+            }
+        } else {
+            res.send(`<script>alert('Submission failed. Please try again.'); location.href='/dashboard'</script>`);
+        }
     }
 });
 
