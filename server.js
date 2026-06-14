@@ -3,15 +3,21 @@ const session = require('express-session');
 const bodyParser = require('body-parser');
 const { neon } = require('@neondatabase/serverless');
 
-// Database connection setup
+// Global handler for unhandled promise rejections (prevents Vercel crash)
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Application will not crash; error is logged.
+});
+
+// Database connection (safe initialization)
 let sql;
 if (!process.env.DATABASE_URL) {
-  console.error("Missing DATABASE_URL env variable");
+  console.error("FATAL: DATABASE_URL is not set in environment variables.");
 } else {
   try {
     sql = neon(process.env.DATABASE_URL);
   } catch (err) {
-    console.error("Neon connection error:", err);
+    console.error("Failed to create Neon connection:", err);
   }
 }
 
@@ -25,18 +31,17 @@ app.use(session({
   cookie: { secure: false }
 }));
 
-// Middleware to ensure database is available
+// Middleware: Block all routes if database connection is not established
 app.use((req, res, next) => {
   if (!sql) {
-    return res.status(500).send('Database not configured. Set DATABASE_URL environment variable on Vercel.');
+    return res.status(500).send('Database not configured. Please set DATABASE_URL environment variable.');
   }
   next();
 });
 
-// ---------- Database Initialization ----------
+// ---------- DATABASE INITIALIZATION ----------
 let dbReady = false;
 async function initDatabase() {
-  // Create tables if not exists
   await sql`CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(50) UNIQUE NOT NULL,
@@ -92,7 +97,7 @@ async function initDatabase() {
     is_read INTEGER DEFAULT 0
   )`;
 
-  // Add columns safely (Neon supports ADD COLUMN IF NOT EXISTS)
+  // Add columns safely
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS contact VARCHAR(20)`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_numeric NUMERIC(10,2) DEFAULT 0.0`;
@@ -121,7 +126,6 @@ async function initDatabase() {
     await sql`INSERT INTO system_settings (key, value) VALUES (${key}, ${value}) ON CONFLICT (key) DO NOTHING`;
   }
 
-  // Default buyer account
   const buyer = await sql`SELECT id FROM users WHERE username = 'buyer'`;
   if (!buyer.length) {
     await sql`INSERT INTO users (username, password, email, address, contact, balance_numeric)
@@ -129,7 +133,6 @@ async function initDatabase() {
   }
 }
 
-// Run DB init on first request
 app.use(async (req, res, next) => {
   if (!dbReady) {
     try {
@@ -137,13 +140,23 @@ app.use(async (req, res, next) => {
       dbReady = true;
     } catch (e) {
       console.error('DB Init Error:', e);
-      return res.status(500).send('Database initialization failed. Check DATABASE_URL and try again.');
+      return res.status(500).send('Database initialization failed. Please check DATABASE_URL.');
     }
   }
   next();
 });
 
-// ---------- Helper Functions ----------
+// Health check endpoint
+app.get('/api/health', async (req, res) => {
+  try {
+    await sql`SELECT 1`;
+    res.json({ status: 'ok', db: 'connected' });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// Helpers
 async function getSetting(key) {
   const rows = await sql`SELECT value FROM system_settings WHERE key = ${key}`;
   return rows.length ? rows[0].value : null;
@@ -188,7 +201,7 @@ async function generateUserCode(username, referredBy) {
   }
 }
 
-// ---------- Translations (Sinhala & English) ----------
+// Translations
 const t = {
   en: {
     title: "GALAXY WORKERS", login: "Login", reg: "Register",
@@ -216,89 +229,32 @@ const t = {
   }
 };
 
-// ---------- HTML Page Builder (Safe) ----------
-function buildPage(req, title, bodyContent) {
+// HTML builder (safe, no template literals for dynamic content)
+function buildPage(req, title, body) {
   const lang = req.session.lang || 'en';
   const tr = t[lang];
-  const langSelect = `<select onchange="location.href='/change-lang?lang='+this.value" style="background:#0b0c10;color:#66fcf1;border:1px solid #45a29e;padding:6px;border-radius:5px">
-    <option value="en" ${lang==='en'?'selected':''}>En</option>
-    <option value="si" ${lang==='si'?'selected':''}>සිං</option>
-  </select>`;
-  return `<!DOCTYPE html><html lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${title}</title>
-  <style>
-    body{background:#0b0c10;color:#c5c6c7;font-family:sans-serif;padding:15px;margin:0}
-    .container{max-width:1000px;margin:20px auto;background:#1f2833;padding:20px;border-radius:10px;border:1px solid #45a29e}
-    .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:1px solid #45a29e;padding-bottom:15px}
-    .header h2{color:#66fcf1;margin:0}
-    input,textarea,select{width:100%;padding:10px;margin:8px 0;border-radius:5px;border:1px solid #45a29e;background:#0b0c10;color:#fff;box-sizing:border-box}
-    button{width:100%;padding:12px;background:#45a29e;border:none;color:#000;font-weight:bold;font-size:16px;border-radius:5px;cursor:pointer;margin-top:10px}
-    button:hover{background:#66fcf1}
-    .user-row{background:#0b0c10;padding:15px;margin:12px 0;border-radius:5px;border-left:5px solid #45a29e}
-    a{color:#66fcf1;text-decoration:none}
-    .logout-btn{background:#ff4d4d;color:#fff;padding:6px 14px;font-size:13px;border-radius:4px}
-    .navbar{display:flex;background:#0b0c10;border:1px solid #45a29e;border-radius:5px;margin-bottom:20px;flex-wrap:wrap}
-    .nav-tab{flex:1;min-width:100px;text-align:center;padding:12px;color:#c5c6c7;font-weight:bold;cursor:pointer;background:0;border:none;font-size:13px}
-    .nav-tab.active{background:#45a29e;color:#000}
-    .dashboard-section{display:none}
-    .dashboard-section.active{display:block}
-    .stats-grid{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:20px}
-    .stat-card{flex:1;min-width:calc(33% - 12px);background:#0b0c10;border:1px solid #45a29e;padding:15px;border-radius:8px;text-align:center}
-    @media(max-width:600px){.stat-card{min-width:100%}}
-    .badge-pending{background:#f0ad4e;color:#000;padding:2px 6px;border-radius:3px;font-size:11px}
-    .badge-success{background:#45a29e;color:#000;padding:2px 6px;border-radius:3px;font-size:11px}
-    .badge-fail{background:#ff4d4d;color:#fff;padding:2px 6px;border-radius:3px;font-size:11px}
-    .payment-ready-btn{background:#f39c12;color:#fff;animation:glow 2s infinite;padding:8px;border-radius:4px;display:inline-block;margin-top:10px}
-    @keyframes glow{0%{box-shadow:0 0 5px #f39c12}50%{box-shadow:0 0 20px #f39c12}100%{box-shadow:0 0 5px #f39c12}}
-    .btn-done{background:#2ecc71;color:#fff;padding:5px 10px;border-radius:4px;display:inline-block}
-    .btn-wrong{background:#ff4d4d;color:#fff;padding:5px 10px;border-radius:4px}
-    .search-form{display:flex;gap:10px;margin-bottom:15px}
-    .search-form input{flex:1}
-    .search-form button{width:auto;margin:0}
-    .toggle-btn{background:#45a29e;color:#000;padding:5px 10px;margin-right:5px;border:none;border-radius:4px;font-size:12px;cursor:pointer}
-  </style>
-  <script>
-    function switchSection(id){
-      document.querySelectorAll('.dashboard-section').forEach(s=>s.classList.remove('active'));
-      document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
-      document.getElementById(id).classList.add('active');
-      event.target.classList.add('active');
-    }
-    function toggleDiv(uid,type){
-      const el=document.getElementById(type+'-'+uid);
-      el.style.display=el.style.display==='none'?'block':'none';
-    }
-    function copyRef(){
-      document.getElementById('refLinkInput').select();
-      document.execCommand('copy');
-      alert('Copied!');
-    }
-  </script></head><body><div class="container">
-  <div class="header"><h2>${tr.title}</h2>
-  <div style="display:flex;gap:10px;align-items:center">${langSelect} <a href="/logout" class="logout-btn">${tr.logout}</a></div></div>
-  ${bodyContent}</div></body></html>`;
+  const langOptions = '<option value="en" ' + (lang === 'en' ? 'selected' : '') + '>En</option><option value="si" ' + (lang === 'si' ? 'selected' : '') + '>සිං</option>';
+  return '<!DOCTYPE html><html lang="' + lang + '"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>' + title + '</title>' +
+  '<style>body{background:#0b0c10;color:#c5c6c7;font-family:sans-serif;padding:15px;margin:0}.container{max-width:1000px;margin:20px auto;background:#1f2833;padding:20px;border-radius:10px;border:1px solid #45a29e}.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:1px solid #45a29e;padding-bottom:15px}.header h2{color:#66fcf1;margin:0}input,textarea,select{width:100%;padding:10px;margin:8px 0;border-radius:5px;border:1px solid #45a29e;background:#0b0c10;color:#fff;box-sizing:border-box}button{width:100%;padding:12px;background:#45a29e;border:none;color:#000;font-weight:bold;font-size:16px;border-radius:5px;cursor:pointer;margin-top:10px}button:hover{background:#66fcf1}.user-row{background:#0b0c10;padding:15px;margin:12px 0;border-radius:5px;border-left:5px solid #45a29e}a{color:#66fcf1;text-decoration:none}.logout-btn{background:#ff4d4d;color:#fff;padding:6px 14px;font-size:13px;border-radius:4px}.navbar{display:flex;background:#0b0c10;border:1px solid #45a29e;border-radius:5px;margin-bottom:20px;flex-wrap:wrap}.nav-tab{flex:1;min-width:100px;text-align:center;padding:12px;color:#c5c6c7;font-weight:bold;cursor:pointer;background:0;border:none;font-size:13px}.nav-tab.active{background:#45a29e;color:#000}.dashboard-section{display:none}.dashboard-section.active{display:block}.stats-grid{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:20px}.stat-card{flex:1;min-width:calc(33% - 12px);background:#0b0c10;border:1px solid #45a29e;padding:15px;border-radius:8px;text-align:center}@media(max-width:600px){.stat-card{min-width:100%}}.badge-pending{background:#f0ad4e;color:#000;padding:2px 6px;border-radius:3px;font-size:11px}.badge-success{background:#45a29e;color:#000;padding:2px 6px;border-radius:3px;font-size:11px}.badge-fail{background:#ff4d4d;color:#fff;padding:2px 6px;border-radius:3px;font-size:11px}.payment-ready-btn{background:#f39c12;color:#fff;animation:glow 2s infinite;padding:8px;border-radius:4px;display:inline-block;margin-top:10px}@keyframes glow{0%{box-shadow:0 0 5px #f39c12}50%{box-shadow:0 0 20px #f39c12}100%{box-shadow:0 0 5px #f39c12}}.btn-done{background:#2ecc71;color:#fff;padding:5px 10px;border-radius:4px;display:inline-block}.btn-wrong{background:#ff4d4d;color:#fff;padding:5px 10px;border-radius:4px}.search-form{display:flex;gap:10px;margin-bottom:15px}.search-form input{flex:1}.search-form button{width:auto;margin:0}.toggle-btn{background:#45a29e;color:#000;padding:5px 10px;margin-right:5px;border:none;border-radius:4px;font-size:12px;cursor:pointer}</style>' +
+  '<script>function switchSection(id){document.querySelectorAll(".dashboard-section").forEach(s=>s.classList.remove("active"));document.querySelectorAll(".nav-tab").forEach(t=>t.classList.remove("active"));document.getElementById(id).classList.add("active");event.target.classList.add("active");}function toggleDiv(uid,type){document.getElementById(type+"-"+uid).style.display=document.getElementById(type+"-"+uid).style.display==="none"?"block":"none";}function copyRef(){document.getElementById("refLinkInput").select();document.execCommand("copy");alert("Copied!");}</script>' +
+  '</head><body><div class="container"><div class="header"><h2>' + tr.title + '</h2><div style="display:flex;gap:10px;align-items:center"><select onchange="location.href=\'/change-lang?lang=\'+this.value" style="background:#0b0c10;color:#66fcf1;border:1px solid #45a29e;padding:6px;border-radius:5px">' + langOptions + '</select><a href="/logout" class="logout-btn">' + tr.logout + '</a></div></div>' + body + '</div></body></html>';
 }
-
-// ---------- Routes ----------
 
 app.get('/change-lang', (req, res) => {
   req.session.lang = req.query.lang === 'si' ? 'si' : 'en';
   res.redirect(req.get('referer') || '/');
 });
 
-// Auth
+// Auth routes
 app.get('/', (req, res) => {
   if (req.session.user) return req.session.user === 'buyer' ? res.redirect('/buyer-dashboard') : res.redirect('/dashboard');
   const tr = t[req.session.lang || 'en'];
-  res.send(buildPage(req, 'Login', `<h3>${tr.login}</h3>
-    <form action="/login" method="POST"><input name="username" placeholder="${tr.user}" required><input type="password" name="password" placeholder="${tr.pass}" required><button>${tr.btnLog}</button></form>
-    <p style="text-align:center"><a href="/register">${tr.reg}</a></p>`));
+  res.send(buildPage(req, 'Login', '<h3>' + tr.login + '</h3><form action="/login" method="POST"><input name="username" placeholder="' + tr.user + '" required><input type="password" name="password" placeholder="' + tr.pass + '" required><button>' + tr.btnLog + '</button></form><p style="text-align:center"><a href="/register">' + tr.reg + '</a></p>'));
 });
 
 app.get('/register', (req, res) => {
   const tr = t[req.session.lang || 'en'];
-  res.send(buildPage(req, 'Register', `<h3>${tr.reg}</h3>
-    <form action="/register" method="POST"><input name="username" placeholder="${tr.user}" required><input type="password" name="password" placeholder="${tr.pass}" required><input type="email" name="email" placeholder="${tr.email}" required><input name="address" placeholder="Address" required><input name="contact" placeholder="Contact" required><input type="hidden" name="ref_code" value="${req.query.ref || ''}"><button>${tr.btnReg}</button></form>
-    <p><a href="/">Back</a></p>`));
+  res.send(buildPage(req, 'Register', '<h3>' + tr.reg + '</h3><form action="/register" method="POST"><input name="username" placeholder="' + tr.user + '" required><input type="password" name="password" placeholder="' + tr.pass + '" required><input type="email" name="email" placeholder="' + tr.email + '" required><input name="address" placeholder="Address" required><input name="contact" placeholder="Contact" required><input type="hidden" name="ref_code" value="' + (req.query.ref || '') + '"><button>' + tr.btnReg + '</button></form><p><a href="/">Back</a></p>'));
 });
 
 app.post('/register', async (req, res) => {
@@ -386,7 +342,6 @@ app.get('/buyer-mark-done', async (req, res) => {
       const t = task[0];
       await sql`UPDATE gmail_tasks SET status='Success' WHERE id = ${req.query.id}`;
       await sql`UPDATE users SET balance_numeric = balance_numeric + ${t.amount} WHERE username = ${t.username}`;
-      // Referral commission logic simplified
       if (t.referral_commission_paid === 0) {
         const user = await sql`SELECT referred_by FROM users WHERE username = ${t.username}`;
         if (user.length && user[0].referred_by) {
@@ -492,7 +447,6 @@ app.get('/dashboard', async (req, res) => {
         '<div id="gsettings" class="dashboard-section"><h3>Gmail Settings</h3><form action="/update-gmail-settings" method="POST"><label>Price LK:</label><input name="gmail_price_lk" value="' + (await getSetting('gmail_task_price_lk')||'0.25') + '"><label>Price INTL:</label><input name="gmail_price_intl" value="' + (await getSetting('gmail_task_price_intl')||'0.25') + '"><label>EN:</label><textarea name="instructions_en">' + (await getSetting('gmail_task_instructions_en')||'') + '</textarea><label>SI:</label><textarea name="instructions_si">' + (await getSetting('gmail_task_instructions_si')||'') + '</textarea><button>Update</button></form></div>' +
         '<div id="rsettings" class="dashboard-section"><h3>Referral</h3><form action="/update-referral-settings" method="POST">' + [1,2,3,4,5,6].map(i => '<label>Tier ' + i + ':</label><input name="tier' + i + '" value="' + (await getSetting('referral_commission_tier'+i)||[4,5,6,7,10,15][i-1]) + '">').join('') + '<button>Update</button></form></div>'));
     } else {
-      // Worker
       const user = await sql`SELECT * FROM users WHERE username = ${username}`;
       if (!user.length) return res.redirect('/logout');
       const u = user[0];
@@ -629,10 +583,8 @@ app.post('/update-referral-settings', async (req, res) => {
   res.send("<script>alert('Updated!'); location.href='/dashboard?tab=rsettings'</script>");
 });
 
-// Export for Vercel
 module.exports = app;
 
-// Local development
 if (process.env.NODE_ENV !== 'production') {
   const port = process.env.PORT || 3000;
   app.listen(port, () => console.log('Server running on port ' + port));
