@@ -41,109 +41,103 @@ app.get('/proof-image/:id', async (req, res) => {
     }
 });
 
-// ===================== DATABASE INITIALIZATION =====================
+// ===================== DATABASE INITIALIZATION – CRASH-PROOF =====================
 async function initDb() {
-    // Create tables if not exist (all others)
-    await sql`CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        username VARCHAR(50) UNIQUE NOT NULL,
-        password VARCHAR(50) NOT NULL,
-        email VARCHAR(100) NOT NULL
-    )`;
-    await sql`CREATE TABLE IF NOT EXISTS task_logs (
-        id SERIAL PRIMARY KEY,
-        username VARCHAR(50) NOT NULL,
-        task_name VARCHAR(100) NOT NULL,
-        proof_data TEXT,
-        amount NUMERIC(10,2) DEFAULT 0.50,
-        status VARCHAR(20) NOT NULL,
-        timestamp VARCHAR(50) NOT NULL
-    )`;
-    await sql`CREATE TABLE IF NOT EXISTS cpa_configs (
-        id SERIAL PRIMARY KEY,
-        network_name VARCHAR(100) NOT NULL,
-        embed_code TEXT NOT NULL,
-        instructions_en TEXT,
-        instructions_si TEXT,
-        instructions_ta TEXT,
-        is_active INTEGER DEFAULT 1
-    )`;
-    await sql`CREATE TABLE IF NOT EXISTS system_settings (
-        key VARCHAR(100) PRIMARY KEY,
-        value TEXT
-    )`;
-    await sql`CREATE TABLE IF NOT EXISTS payment_proofs (
-        id SERIAL PRIMARY KEY,
-        buyer_username VARCHAR(50) NOT NULL,
-        file_data TEXT,
-        original_name VARCHAR(255),
-        timestamp VARCHAR(50) NOT NULL,
-        is_deleted INTEGER DEFAULT 0
-    )`;
-    await sql`CREATE TABLE IF NOT EXISTS notifications (
-        id SERIAL PRIMARY KEY,
-        target_user VARCHAR(50) NOT NULL,
-        message TEXT NOT NULL,
-        timestamp VARCHAR(50) NOT NULL,
-        is_read INTEGER DEFAULT 0
-    )`;
-
-    // ----- gmail_tasks: create if not exists, then fix columns -----
-    await sql`CREATE TABLE IF NOT EXISTS gmail_tasks (
-        id SERIAL PRIMARY KEY,
-        username VARCHAR(50) NOT NULL,
-        email_created VARCHAR(100) NOT NULL,
-        password_created VARCHAR(50) NOT NULL,
-        task_code VARCHAR(50) NOT NULL,
-        status VARCHAR(20) DEFAULT 'Pending',
-        amount NUMERIC(10,2) DEFAULT 0.25,
-        referral_commission_paid INTEGER DEFAULT 0,
-        buyer_reason TEXT,
-        timestamp VARCHAR(50) NOT NULL
-    )`;
-
-    // Safe column additions (ensure we have required columns, regardless of current names)
-    const desiredCols = [
-        {name: 'email_created', type: 'VARCHAR(100)'},
-        {name: 'password_created', type: 'VARCHAR(50)'},
-        {name: 'task_code', type: 'VARCHAR(50)'},
-        {name: 'status', type: 'VARCHAR(20) DEFAULT \'Pending\''},
-        {name: 'amount', type: 'NUMERIC(10,2) DEFAULT 0.25'},
-        {name: 'referral_commission_paid', type: 'INTEGER DEFAULT 0'},
-        {name: 'buyer_reason', type: 'TEXT'},
-        {name: 'timestamp', type: 'VARCHAR(50)'}
-    ];
-    for (const col of desiredCols) {
-        await sql.unsafe(`ALTER TABLE gmail_tasks ADD COLUMN IF NOT EXISTS "${col.name}" ${col.type}`);
-    }
-
-    // Attempt to rename columns with spaces to underscore versions (will fail silently if not possible)
+    // Each step is wrapped in its own try/catch so one failure doesn't stop others
     try {
-        const spaceCols = [
-            {old: 'email created', new: 'email_created'},
-            {old: 'password created', new: 'password_created'}
-        ];
-        for (const {old, new: newCol} of spaceCols) {
-            try {
-                await sql.unsafe(`ALTER TABLE gmail_tasks RENAME COLUMN "${old}" TO ${newCol}`);
-                console.log(`Renamed column "${old}" to ${newCol}`);
-            } catch (innerErr) { /* ignore */ }
-        }
-    } catch (e) { /* ignore */ }
+        await sql`CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(50) UNIQUE NOT NULL,
+            password VARCHAR(50) NOT NULL,
+            email VARCHAR(100) NOT NULL
+        )`;
+    } catch (e) { console.error('users table:', e.message); }
 
-    // Add missing columns to users & notifications
-    await sql`
-        DO $$ BEGIN
-            ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;
-            ALTER TABLE users ADD COLUMN IF NOT EXISTS contact VARCHAR(20);
-            ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_numeric NUMERIC(10,2) DEFAULT 0.0;
-            ALTER TABLE users ADD COLUMN IF NOT EXISTS earnings_percentage NUMERIC(5,2) DEFAULT 100.0;
-            ALTER TABLE users ADD COLUMN IF NOT EXISTS country VARCHAR(10) DEFAULT 'LK';
-            ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(20);
-            ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by VARCHAR(50);
-        END $$;
-    `;
-    await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read INTEGER DEFAULT 0`;
+    try {
+        await sql`CREATE TABLE IF NOT EXISTS task_logs (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(50) NOT NULL,
+            task_name VARCHAR(100) NOT NULL,
+            proof_data TEXT,
+            amount NUMERIC(10,2) DEFAULT 0.50,
+            status VARCHAR(20) NOT NULL,
+            timestamp VARCHAR(50) NOT NULL
+        )`;
+    } catch (e) { console.error('task_logs table:', e.message); }
+
+    try {
+        await sql`CREATE TABLE IF NOT EXISTS cpa_configs (
+            id SERIAL PRIMARY KEY,
+            network_name VARCHAR(100) NOT NULL,
+            embed_code TEXT NOT NULL,
+            instructions_en TEXT,
+            instructions_si TEXT,
+            instructions_ta TEXT,
+            is_active INTEGER DEFAULT 1
+        )`;
+    } catch (e) { console.error('cpa_configs table:', e.message); }
+
+    try {
+        await sql`CREATE TABLE IF NOT EXISTS system_settings (
+            key VARCHAR(100) PRIMARY KEY,
+            value TEXT
+        )`;
+    } catch (e) { console.error('system_settings table:', e.message); }
+
+    try {
+        await sql`CREATE TABLE IF NOT EXISTS gmail_tasks (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(50) NOT NULL,
+            email_created VARCHAR(100) NOT NULL,
+            password_created VARCHAR(50) NOT NULL,
+            task_code VARCHAR(50) NOT NULL,
+            status VARCHAR(20) DEFAULT 'Pending',
+            amount NUMERIC(10,2) DEFAULT 0.25,
+            referral_commission_paid INTEGER DEFAULT 0,
+            buyer_reason TEXT,
+            timestamp VARCHAR(50) NOT NULL
+        )`;
+    } catch (e) { console.error('gmail_tasks table:', e.message); }
+
+    try {
+        await sql`CREATE TABLE IF NOT EXISTS payment_proofs (
+            id SERIAL PRIMARY KEY,
+            buyer_username VARCHAR(50) NOT NULL,
+            file_data TEXT,
+            original_name VARCHAR(255),
+            timestamp VARCHAR(50) NOT NULL,
+            is_deleted INTEGER DEFAULT 0
+        )`;
+    } catch (e) { console.error('payment_proofs table:', e.message); }
+
+    try {
+        await sql`CREATE TABLE IF NOT EXISTS notifications (
+            id SERIAL PRIMARY KEY,
+            target_user VARCHAR(50) NOT NULL,
+            message TEXT NOT NULL,
+            timestamp VARCHAR(50) NOT NULL,
+            is_read INTEGER DEFAULT 0
+        )`;
+    } catch (e) { console.error('notifications table:', e.message); }
+
+    // Add missing columns to users and notifications (safe, ignore errors)
+    try {
+        await sql`
+            DO $$ BEGIN
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS contact VARCHAR(20);
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_numeric NUMERIC(10,2) DEFAULT 0.0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS earnings_percentage NUMERIC(5,2) DEFAULT 100.0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS country VARCHAR(10) DEFAULT 'LK';
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(20);
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by VARCHAR(50);
+            END $$;
+        `;
+    } catch (e) { console.error('users columns add:', e.message); }
+
+    try {
+        await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read INTEGER DEFAULT 0`;
+    } catch (e) { console.error('notifications column add:', e.message); }
 
     // Default settings
     const settings = [
@@ -162,14 +156,18 @@ async function initDb() {
         ['referral_commission_tier6', '15']
     ];
     for (const [key, value] of settings) {
-        await sql`INSERT INTO system_settings (key, value) VALUES (${key}, ${value}) ON CONFLICT (key) DO NOTHING`;
+        try {
+            await sql`INSERT INTO system_settings (key, value) VALUES (${key}, ${value}) ON CONFLICT (key) DO NOTHING`;
+        } catch (e) { console.error(`Setting ${key}:`, e.message); }
     }
 
     // Default buyer account
-    const buyer = await sql`SELECT id FROM users WHERE username = 'buyer'`;
-    if (!buyer.length) {
-        await sql`INSERT INTO users (username, password, email, address, contact, balance_numeric) VALUES ('buyer', 'buyer123', 'buyer@galaxy.com', 'Buyer Address', '000000', 0)`;
-    }
+    try {
+        const buyer = await sql`SELECT id FROM users WHERE username = 'buyer'`;
+        if (!buyer.length) {
+            await sql`INSERT INTO users (username, password, email, address, contact, balance_numeric) VALUES ('buyer', 'buyer123', 'buyer@galaxy.com', 'Buyer Address', '000000', 0)`;
+        }
+    } catch (e) { console.error('buyer creation:', e.message); }
 
     console.log('Database initialized');
 }
