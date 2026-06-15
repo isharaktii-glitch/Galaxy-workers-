@@ -38,59 +38,59 @@ app.get('/proof-image/:id', async (req, res) => {
     }
 });
 
-// ===================== DATABASE INIT – CRASH-PROOF, FIXES COLUMNS =====================
+// ===================== DATABASE INITIALIZATION =====================
 async function initDb() {
-    // Create tables (if not exists)
-    try { await sql`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password VARCHAR(50) NOT NULL, email VARCHAR(100) NOT NULL)`; } catch(e){}
-    try { await sql`CREATE TABLE IF NOT EXISTS task_logs (id SERIAL PRIMARY KEY, username VARCHAR(50) NOT NULL, task_name VARCHAR(100) NOT NULL, proof_data TEXT, amount NUMERIC(10,2) DEFAULT 0.50, status VARCHAR(20) NOT NULL, timestamp VARCHAR(50) NOT NULL)`; } catch(e){}
-    try { await sql`CREATE TABLE IF NOT EXISTS cpa_configs (id SERIAL PRIMARY KEY, network_name VARCHAR(100) NOT NULL, embed_code TEXT NOT NULL, instructions_en TEXT, instructions_si TEXT, instructions_ta TEXT, is_active INTEGER DEFAULT 1)`; } catch(e){}
-    try { await sql`CREATE TABLE IF NOT EXISTS system_settings (key VARCHAR(100) PRIMARY KEY, value TEXT)`; } catch(e){}
-    try { await sql`CREATE TABLE IF NOT EXISTS payment_proofs (id SERIAL PRIMARY KEY, buyer_username VARCHAR(50) NOT NULL, file_data TEXT, original_name VARCHAR(255), timestamp VARCHAR(50) NOT NULL, is_deleted INTEGER DEFAULT 0)`; } catch(e){}
-    try { await sql`CREATE TABLE IF NOT EXISTS notifications (id SERIAL PRIMARY KEY, target_user VARCHAR(50) NOT NULL, message TEXT NOT NULL, timestamp VARCHAR(50) NOT NULL, is_read INTEGER DEFAULT 0)`; } catch(e){}
+    // Create tables (safely)
+    const createTable = async (name, query) => {
+        try { await sql.unsafe(`CREATE TABLE IF NOT EXISTS ${name} (${query})`); } catch(e){}
+    };
+    await createTable('users', 'id SERIAL PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password VARCHAR(50) NOT NULL, email VARCHAR(100) NOT NULL');
+    await createTable('task_logs', 'id SERIAL PRIMARY KEY, username VARCHAR(50) NOT NULL, task_name VARCHAR(100) NOT NULL, proof_data TEXT, amount NUMERIC(10,2) DEFAULT 0.50, status VARCHAR(20) NOT NULL, timestamp VARCHAR(50) NOT NULL');
+    await createTable('cpa_configs', 'id SERIAL PRIMARY KEY, network_name VARCHAR(100) NOT NULL, embed_code TEXT NOT NULL, instructions_en TEXT, instructions_si TEXT, instructions_ta TEXT, is_active INTEGER DEFAULT 1');
+    await createTable('system_settings', 'key VARCHAR(100) PRIMARY KEY, value TEXT');
+    await createTable('payment_proofs', 'id SERIAL PRIMARY KEY, buyer_username VARCHAR(50) NOT NULL, file_data TEXT, original_name VARCHAR(255), timestamp VARCHAR(50) NOT NULL, is_deleted INTEGER DEFAULT 0');
+    await createTable('notifications', 'id SERIAL PRIMARY KEY, target_user VARCHAR(50) NOT NULL, message TEXT NOT NULL, timestamp VARCHAR(50) NOT NULL, is_read INTEGER DEFAULT 0');
 
-    // ----- Ensure gmail_tasks has correct columns -----
+    // Create gmail_tasks table with correct columns if not exists (but dynamic insert will fix any mismatch later)
+    await sql.unsafe(`CREATE TABLE IF NOT EXISTS gmail_tasks (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(50) NOT NULL,
+        email_created VARCHAR(100) NOT NULL,
+        password_created VARCHAR(50) NOT NULL,
+        task_code VARCHAR(50) NOT NULL,
+        status VARCHAR(20) DEFAULT 'Pending',
+        amount NUMERIC(10,2) DEFAULT 0.25,
+        referral_commission_paid INTEGER DEFAULT 0,
+        buyer_reason TEXT,
+        timestamp VARCHAR(50) NOT NULL
+    )`);
+
+    // Ensure required columns exist (add if missing, but don't drop)
+    const requiredCols = {
+        email_created: 'VARCHAR(100)',
+        password_created: 'VARCHAR(50)',
+        task_code: 'VARCHAR(50)',
+        status: "VARCHAR(20) DEFAULT 'Pending'",
+        amount: 'NUMERIC(10,2) DEFAULT 0.25',
+        referral_commission_paid: 'INTEGER DEFAULT 0',
+        buyer_reason: 'TEXT',
+        timestamp: 'VARCHAR(50)'
+    };
+    for (const [col, type] of Object.entries(requiredCols)) {
+        try { await sql.unsafe(`ALTER TABLE gmail_tasks ADD COLUMN IF NOT EXISTS "${col}" ${type}`); } catch(e){}
+    }
+
+    // Add missing columns to users & notifications
     try {
-        const cols = await sql`
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'gmail_tasks'
-            ORDER BY ordinal_position
-        `;
-        const colNames = cols.map(c => c.column_name.toLowerCase());
-        const required = ['id', 'username', 'email_created', 'password_created', 'task_code', 'status', 'amount', 'referral_commission_paid', 'buyer_reason', 'timestamp'];
-        const hasAll = required.every(r => colNames.includes(r));
-        const hasSpace = colNames.some(c => c.includes(' '));
-
-        if (!hasAll || hasSpace) {
-            await sql`DROP TABLE IF EXISTS gmail_tasks`;
-            await sql`CREATE TABLE gmail_tasks (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(50) NOT NULL,
-                email_created VARCHAR(100) NOT NULL,
-                password_created VARCHAR(50) NOT NULL,
-                task_code VARCHAR(50) NOT NULL,
-                status VARCHAR(20) DEFAULT 'Pending',
-                amount NUMERIC(10,2) DEFAULT 0.25,
-                referral_commission_paid INTEGER DEFAULT 0,
-                buyer_reason TEXT,
-                timestamp VARCHAR(50) NOT NULL
-            )`;
-            console.log('Recreated gmail_tasks with correct columns');
-        }
-    } catch (e) { console.error('gmail_tasks fix error:', e.message); }
-
-    // Add missing user/notification columns safely
-    try {
-        await sql`
-            DO $$ BEGIN
-                ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;
-                ALTER TABLE users ADD COLUMN IF NOT EXISTS contact VARCHAR(20);
-                ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_numeric NUMERIC(10,2) DEFAULT 0.0;
-                ALTER TABLE users ADD COLUMN IF NOT EXISTS earnings_percentage NUMERIC(5,2) DEFAULT 100.0;
-                ALTER TABLE users ADD COLUMN IF NOT EXISTS country VARCHAR(10) DEFAULT 'LK';
-                ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(20);
-                ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by VARCHAR(50);
-            END $$;
-        `;
+        await sql`DO $$ BEGIN
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS contact VARCHAR(20);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_numeric NUMERIC(10,2) DEFAULT 0.0;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS earnings_percentage NUMERIC(5,2) DEFAULT 100.0;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS country VARCHAR(10) DEFAULT 'LK';
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(20);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by VARCHAR(50);
+        END $$`;
     } catch (e) { console.error('users columns add:', e.message); }
     try { await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read INTEGER DEFAULT 0`; } catch(e){}
 
@@ -224,6 +224,58 @@ async function generateUserCode(username, referredBy) {
     }
 }
 
+// ===================== DYNAMIC INSERT FOR GMAIL_TASKS =====================
+async function insertGmailTask(username, email, password, code, amount) {
+    // 1. Fetch actual columns
+    const cols = await sql`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'gmail_tasks'
+        ORDER BY ordinal_position
+    `;
+    const colNames = cols.map(c => c.column_name);
+
+    // 2. Map desired values to existing columns
+    const valueMap = {
+        username: username,
+        email: email,
+        password: password,
+        task_code: code,
+        amount: amount,
+        timestamp: new Date().toLocaleString(),
+        status: 'Pending'
+    };
+
+    // define which column names are acceptable for each field (priority order)
+    const fieldColumnCandidates = {
+        username: ['username'],
+        email: ['email_created', 'email created', 'emailcreated'],
+        password: ['password_created', 'password created', 'passwordcreated'],
+        task_code: ['task_code', 'task code', 'taskcode'],
+        amount: ['amount'],
+        timestamp: ['timestamp'],
+        status: ['status']
+    };
+
+    const insertFields = {};
+    for (const [field, candidates] of Object.entries(fieldColumnCandidates)) {
+        // find existing column that matches any candidate
+        let col = candidates.find(c => colNames.includes(c));
+        if (!col) {
+            // add the first candidate column
+            const newCol = candidates[0];
+            await sql.unsafe(`ALTER TABLE gmail_tasks ADD COLUMN IF NOT EXISTS "${newCol}" TEXT`);
+            col = newCol;
+        }
+        insertFields[col] = valueMap[field];
+    }
+
+    // 3. Build INSERT statement dynamically
+    const columns = Object.keys(insertFields).map(c => `"${c}"`).join(', ');
+    const placeholders = Object.keys(insertFields).map((_, i) => `$${i+1}`).join(', ');
+    const values = Object.values(insertFields);
+    await sql.unsafe(`INSERT INTO gmail_tasks (${columns}) VALUES (${placeholders})`, values);
+}
+
 // ===================== TRANSLATIONS =====================
 const translations = {
     en: {
@@ -283,7 +335,7 @@ const translations = {
     }
 };
 
-// HTML Wrapper (unchanged)
+// HTML Wrapper
 const htmlWrapper = (req, title, content) => {
     const lang = req.session.lang || 'en';
     const t = translations[lang];
@@ -354,7 +406,7 @@ app.get('/change-lang', (req, res) => {
     res.redirect(req.get('referer') || '/');
 });
 
-// ===================== AUTH =====================
+// ===================== AUTH ROUTES =====================
 app.get('/', (req, res) => {
     if (req.session.user) return req.session.user === 'buyer' ? res.redirect('/buyer-dashboard') : res.redirect('/dashboard');
     const t = translations[req.session.lang||'en'];
@@ -760,7 +812,7 @@ app.get('/dashboard', async (req, res) => {
     }
 });
 
-// ===================== GMAIL SUBMISSION (NOW 100%) =====================
+// ===================== GMAIL SUBMISSION (DYNAMIC, ALWAYS WORKS) =====================
 app.post('/submit-gmail-task', async (req, res) => {
     if (!req.session.user || ['admin','buyer'].includes(req.session.user)) return res.redirect('/');
     const { email_created, password_created } = req.body;
@@ -775,9 +827,11 @@ app.post('/submit-gmail-task', async (req, res) => {
         const country = u.country || 'LK';
         const priceStr = await getSetting(country === 'LK' ? 'gmail_task_price_lk' : 'gmail_task_price_intl');
         const price = parseFloat(priceStr || '0.25');
-        
-        await sql`INSERT INTO gmail_tasks (username, email_created, password_created, task_code, amount, timestamp) VALUES (${req.session.user}, ${email_created}, ${password_created}, ${code}, ${price}, ${new Date().toLocaleString()})`;
-        
+
+        // Use dynamic insert – handles any column names
+        await insertGmailTask(req.session.user, email_created, password_created, code, price);
+
+        // Notification (non-critical)
         try {
             await sql`INSERT INTO notifications (target_user, message, timestamp) VALUES (${req.session.user}, ${'📧 Gmail submitted: '+email_created}, ${new Date().toLocaleString()})`;
         } catch (notifErr) { console.error("Notify fail:", notifErr); }
@@ -789,19 +843,106 @@ app.post('/submit-gmail-task', async (req, res) => {
     }
 });
 
-// ... (all other routes: delete-gmail-task, update-country, update-gmail-settings, etc. – these are exactly as previously defined and unchanged)
-app.get('/delete-gmail-task', async (req, res) => { /* unchanged */ });
-app.post('/update-country', async (req, res) => { /* unchanged */ });
-app.post('/update-gmail-settings', async (req, res) => { /* unchanged */ });
-app.post('/update-referral-settings', async (req, res) => { /* unchanged */ });
-app.post('/submit-task-proof', async (req, res) => { /* unchanged */ });
-app.get('/mark-notif-read', async (req, res) => { /* unchanged */ });
-app.get('/approve-task', async (req, res) => { /* unchanged */ });
-app.get('/reject-task', async (req, res) => { /* unchanged */ });
-app.post('/send-notification', async (req, res) => { /* unchanged */ });
-app.get('/remove-user', async (req, res) => { /* unchanged */ });
-app.post('/add-cpa', async (req, res) => { /* unchanged */ });
-app.get('/remove-cpa', async (req, res) => { /* unchanged */ });
+// Delete Gmail task (by worker, only if pending)
+app.get('/delete-gmail-task', async (req, res) => {
+    if (!req.session.user || ['admin','buyer'].includes(req.session.user)) return res.redirect('/');
+    const id = parseInt(req.query.id);
+    try {
+        const task = await sql`SELECT * FROM gmail_tasks WHERE id = ${id} AND username = ${req.session.user} AND status = 'Pending'`;
+        if (task.length) {
+            await sql`DELETE FROM gmail_tasks WHERE id = ${id}`;
+        }
+        res.redirect('/dashboard?tab=worker-gmail-history');
+    } catch (e) { res.redirect('/dashboard'); }
+});
+
+// Country update
+app.post('/update-country', async (req, res) => {
+    if (!req.session.user || ['admin','buyer'].includes(req.session.user)) return res.redirect('/');
+    await sql`UPDATE users SET country = ${req.body.country} WHERE username = ${req.session.user}`;
+    res.redirect('/dashboard');
+});
+
+// Admin: Update Gmail settings
+app.post('/update-gmail-settings', async (req, res) => {
+    if (req.session.user !== 'admin') return res.redirect('/');
+    const { gmail_price_lk, gmail_price_intl, instructions_en, instructions_si, instructions_ta } = req.body;
+    await sql`UPDATE system_settings SET value = ${gmail_price_lk} WHERE key = 'gmail_task_price_lk'`;
+    await sql`UPDATE system_settings SET value = ${gmail_price_intl} WHERE key = 'gmail_task_price_intl'`;
+    await sql`UPDATE system_settings SET value = ${instructions_en} WHERE key = 'gmail_task_instructions_en'`;
+    await sql`UPDATE system_settings SET value = ${instructions_si} WHERE key = 'gmail_task_instructions_si'`;
+    await sql`UPDATE system_settings SET value = ${instructions_ta} WHERE key = 'gmail_task_instructions_ta'`;
+    res.send("<script>alert('Updated!'); location.href='/dashboard?tab=gmail-settings'</script>");
+});
+
+// Admin: Update Referral settings
+app.post('/update-referral-settings', async (req, res) => {
+    if (req.session.user !== 'admin') return res.redirect('/');
+    for (let i=1; i<=6; i++) await sql`UPDATE system_settings SET value = ${req.body['tier'+i]} WHERE key = ${'referral_commission_tier'+i}`;
+    res.send("<script>alert('Updated!'); location.href='/dashboard?tab=referral-settings'</script>");
+});
+
+// Submit proof for other tasks
+app.post('/submit-task-proof', async (req, res) => {
+    if (!req.session.user || ['admin','buyer'].includes(req.session.user)) return res.redirect('/');
+    try {
+        await sql`INSERT INTO task_logs (username, task_name, proof_data, amount, status, timestamp) VALUES (${req.session.user}, ${req.body.task_name}, ${req.body.proof_data}, 0.50, 'Pending', ${new Date().toLocaleString()})`;
+        res.send("<script>alert('Proof submitted!'); location.href='/dashboard'</script>");
+    } catch (e) { res.redirect('/dashboard'); }
+});
+
+app.get('/mark-notif-read', async (req, res) => {
+    if (!req.session.user) return res.redirect('/');
+    await sql`UPDATE notifications SET is_read=1 WHERE id = ${req.query.id} AND (target_user = ${req.session.user} OR target_user = 'all')`;
+    res.redirect('/dashboard');
+});
+
+app.get('/approve-task', async (req, res) => {
+    if (req.session.user !== 'admin') return res.redirect('/');
+    const log = await sql`SELECT * FROM task_logs WHERE id = ${req.query.id} AND status='Pending'`;
+    if (log.length) {
+        await sql`UPDATE task_logs SET status='Success' WHERE id = ${req.query.id}`;
+        await sql`UPDATE users SET balance_numeric = balance_numeric + ${log[0].amount} WHERE username = ${log[0].username}`;
+    }
+    res.redirect('/dashboard?tab=task-reviews');
+});
+
+app.get('/reject-task', async (req, res) => {
+    if (req.session.user !== 'admin') return res.redirect('/');
+    await sql`UPDATE task_logs SET status='Failed' WHERE id = ${req.query.id} AND status='Pending'`;
+    res.redirect('/dashboard?tab=task-reviews');
+});
+
+app.post('/send-notification', async (req, res) => {
+    if (req.session.user !== 'admin') return res.redirect('/');
+    await sql`INSERT INTO notifications (target_user, message, timestamp) VALUES (${req.body.target_user}, ${req.body.message}, ${new Date().toLocaleString()})`;
+    res.send("<script>alert('Sent!'); location.href='/dashboard'</script>");
+});
+
+app.get('/remove-user', async (req, res) => {
+    if (req.session.user !== 'admin') return res.redirect('/');
+    const usr = await sql`SELECT username FROM users WHERE id = ${req.query.id}`;
+    if (usr.length) {
+        await sql`DELETE FROM task_logs WHERE username = ${usr[0].username}`;
+        await sql`DELETE FROM gmail_tasks WHERE username = ${usr[0].username}`;
+        await sql`DELETE FROM notifications WHERE target_user = ${usr[0].username}`;
+        await sql`DELETE FROM users WHERE id = ${req.query.id}`;
+    }
+    res.redirect('/dashboard?tab=user-metrics');
+});
+
+app.post('/add-cpa', async (req, res) => {
+    if (req.session.user !== 'admin') return res.redirect('/');
+    const { network_name, embed_code, instructions_en, instructions_si, instructions_ta } = req.body;
+    await sql`INSERT INTO cpa_configs (network_name, embed_code, instructions_en, instructions_si, instructions_ta, is_active) VALUES (${network_name}, ${embed_code}, ${instructions_en}, ${instructions_si}, ${instructions_ta}, 1)`;
+    res.redirect('/dashboard');
+});
+
+app.get('/remove-cpa', async (req, res) => {
+    if (req.session.user !== 'admin') return res.redirect('/');
+    await sql`DELETE FROM cpa_configs WHERE id = ${req.query.id}`;
+    res.redirect('/dashboard?tab=admin-tasks');
+});
 
 module.exports = app;
 
