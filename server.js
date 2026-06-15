@@ -43,7 +43,7 @@ app.get('/proof-image/:id', async (req, res) => {
 
 // ===================== DATABASE INITIALIZATION =====================
 async function initDb() {
-    // Create tables if not exist (other tables)
+    // Create tables if not exist (all others remain same)
     await sql`CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username VARCHAR(50) UNIQUE NOT NULL,
@@ -72,6 +72,19 @@ async function initDb() {
         key VARCHAR(100) PRIMARY KEY,
         value TEXT
     )`;
+    // gmail_tasks – we create with correct columns if not exists, but the self‑healing route will fix any later mismatch
+    await sql`CREATE TABLE IF NOT EXISTS gmail_tasks (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(50) NOT NULL,
+        email_created VARCHAR(100) NOT NULL,
+        password_created VARCHAR(50) NOT NULL,
+        task_code VARCHAR(50) NOT NULL,
+        status VARCHAR(20) DEFAULT 'Pending',
+        amount NUMERIC(10,2) DEFAULT 0.25,
+        referral_commission_paid INTEGER DEFAULT 0,
+        buyer_reason TEXT,
+        timestamp VARCHAR(50) NOT NULL
+    )`;
     await sql`CREATE TABLE IF NOT EXISTS payment_proofs (
         id SERIAL PRIMARY KEY,
         buyer_username VARCHAR(50) NOT NULL,
@@ -87,88 +100,6 @@ async function initDb() {
         timestamp VARCHAR(50) NOT NULL,
         is_read INTEGER DEFAULT 0
     )`;
-
-    // ========== HANDLE gmail_tasks TABLE ROBUSTLY ==========
-    try {
-        // Check if table exists
-        const tableExists = await sql`
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_name = 'gmail_tasks'
-            )
-        `;
-        if (!tableExists[0].exists) {
-            // Create fresh with correct columns
-            await sql`CREATE TABLE gmail_tasks (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(50) NOT NULL,
-                email_created VARCHAR(100) NOT NULL,
-                password_created VARCHAR(50) NOT NULL,
-                task_code VARCHAR(50) NOT NULL,
-                status VARCHAR(20) DEFAULT 'Pending',
-                amount NUMERIC(10,2) DEFAULT 0.25,
-                referral_commission_paid INTEGER DEFAULT 0,
-                buyer_reason TEXT,
-                timestamp VARCHAR(50) NOT NULL
-            )`;
-            console.log('Created fresh gmail_tasks table');
-        } else {
-            // Table exists, check columns for spaces
-            const cols = await sql`
-                SELECT column_name, data_type FROM information_schema.columns 
-                WHERE table_name = 'gmail_tasks'
-                ORDER BY ordinal_position
-            `;
-            const colNames = cols.map(c => c.column_name);
-            const hasSpaceCols = colNames.some(name => name.includes(' '));
-            
-            if (hasSpaceCols) {
-                console.log('Detected columns with spaces:', colNames);
-                // Count rows
-                const rowCount = await sql`SELECT COUNT(*) as cnt FROM gmail_tasks`;
-                const cnt = parseInt(rowCount[0].cnt);
-                if (cnt === 0) {
-                    // Safe to drop and recreate
-                    await sql`DROP TABLE gmail_tasks`;
-                    await sql`CREATE TABLE gmail_tasks (
-                        id SERIAL PRIMARY KEY,
-                        username VARCHAR(50) NOT NULL,
-                        email_created VARCHAR(100) NOT NULL,
-                        password_created VARCHAR(50) NOT NULL,
-                        task_code VARCHAR(50) NOT NULL,
-                        status VARCHAR(20) DEFAULT 'Pending',
-                        amount NUMERIC(10,2) DEFAULT 0.25,
-                        referral_commission_paid INTEGER DEFAULT 0,
-                        buyer_reason TEXT,
-                        timestamp VARCHAR(50) NOT NULL
-                    )`;
-                    console.log('Dropped and recreated gmail_tasks (empty table)');
-                } else {
-                    // Has data, attempt rename
-                    console.log('Table has data, attempting rename...');
-                    try {
-                        await sql`ALTER TABLE gmail_tasks RENAME COLUMN "email created" TO email_created`;
-                        console.log('Renamed email column');
-                    } catch (e) { console.log('Rename email column failed (maybe already correct):', e.message); }
-                    try {
-                        await sql`ALTER TABLE gmail_tasks RENAME COLUMN "password created" TO password_created`;
-                        console.log('Renamed password column');
-                    } catch (e) { console.log('Rename password column failed:', e.message); }
-                }
-            } else {
-                // Check for missing required columns
-                const required = ['email_created', 'password_created', 'task_code', 'status', 'amount', 'referral_commission_paid', 'buyer_reason', 'timestamp'];
-                for (const col of required) {
-                    if (!colNames.includes(col)) {
-                        await sql`ALTER TABLE gmail_tasks ADD COLUMN IF NOT EXISTS "${col}" TEXT`;
-                        console.log(`Added missing column: ${col}`);
-                    }
-                }
-            }
-        }
-    } catch (e) {
-        console.error('gmail_tasks setup error:', e);
-    }
 
     // Safe column additions for other tables
     await sql`
@@ -210,7 +141,7 @@ async function initDb() {
         await sql`INSERT INTO users (username, password, email, address, contact, balance_numeric) VALUES ('buyer', 'buyer123', 'buyer@galaxy.com', 'Buyer Address', '000000', 0)`;
     }
 
-    console.log('Database initialized completely');
+    console.log('Database initialized');
 }
 
 let dbReady = false;
@@ -857,7 +788,7 @@ app.get('/dashboard', async (req, res) => {
     }
 });
 
-// ===================== GMAIL SUBMISSION – NOW WORKS 100% =====================
+// ===================== SELF-HEALING GMAIL SUBMISSION =====================
 app.post('/submit-gmail-task', async (req, res) => {
     if (!req.session.user || ['admin','buyer'].includes(req.session.user)) return res.redirect('/');
     const { email_created, password_created } = req.body;
@@ -873,14 +804,49 @@ app.post('/submit-gmail-task', async (req, res) => {
         const priceStr = await getSetting(country === 'LK' ? 'gmail_task_price_lk' : 'gmail_task_price_intl');
         const price = parseFloat(priceStr || '0.25');
         await sql`INSERT INTO gmail_tasks (username, email_created, password_created, task_code, amount, timestamp) VALUES (${req.session.user}, ${email_created}, ${password_created}, ${code}, ${price}, ${new Date().toLocaleString()})`;
-        // Notification (non-critical)
+        // Notification
         try {
             await sql`INSERT INTO notifications (target_user, message, timestamp) VALUES (${req.session.user}, ${'📧 Gmail submitted: '+email_created}, ${new Date().toLocaleString()})`;
         } catch (notifErr) { console.error("Notify fail:", notifErr); }
         res.send(`<script>alert('Gmail submitted successfully!'); location.href='/dashboard?tab=worker-gmail-history'</script>`);
     } catch (e) {
-        console.error("Gmail submit error:", e);
-        res.send(`<script>alert('Submission failed. Please try again.'); location.href='/dashboard'</script>`);
+        console.error("Initial insert error:", e.message);
+        const msg = e.message || '';
+        // Check if error is about a missing column
+        if (msg.includes('column') && msg.includes('does not exist')) {
+            // Extract the missing column name
+            const match = msg.match(/column\s+"?([^\s"]+)"?\s+of relation/i);
+            if (match) {
+                const missingCol = match[1].replace(/"/g, '');
+                try {
+                    // Add the missing column (generic TEXT, safe)
+                    await sql.unsafe(`ALTER TABLE gmail_tasks ADD COLUMN IF NOT EXISTS "${missingCol}" TEXT`);
+                    console.log(`Added missing column: ${missingCol}`);
+                    // Retry insert once more
+                    try {
+                        const user = await sql`SELECT country, referral_code, referred_by FROM users WHERE username = ${req.session.user}`;
+                        const u = user[0];
+                        let code = u.referral_code;
+                        if (!code) code = await generateUserCode(req.session.user, u.referred_by);
+                        const country = u.country || 'LK';
+                        const priceStr = await getSetting(country === 'LK' ? 'gmail_task_price_lk' : 'gmail_task_price_intl');
+                        const price = parseFloat(priceStr || '0.25');
+                        await sql`INSERT INTO gmail_tasks (username, email_created, password_created, task_code, amount, timestamp) VALUES (${req.session.user}, ${email_created}, ${password_created}, ${code}, ${price}, ${new Date().toLocaleString()})`;
+                        res.send(`<script>alert('Gmail submitted successfully!'); location.href='/dashboard?tab=worker-gmail-history'</script>`);
+                    } catch (retryErr) {
+                        console.error("Retry insert failed:", retryErr);
+                        res.send(`<script>alert('Submission failed after column fix. Please try again or contact admin.'); location.href='/dashboard'</script>`);
+                    }
+                } catch (alterErr) {
+                    console.error("Column add failed:", alterErr);
+                    res.send(`<script>alert('Failed to fix table column. Please contact admin.'); location.href='/dashboard'</script>`);
+                }
+            } else {
+                res.send(`<script>alert('Submission failed. Could not identify missing column.'); location.href='/dashboard'</script>`);
+            }
+        } else {
+            res.send(`<script>alert('Submission failed. Please try again.'); location.href='/dashboard'</script>`);
+        }
     }
 });
 
