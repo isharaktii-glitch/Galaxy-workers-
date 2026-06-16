@@ -6,19 +6,27 @@ const { google } = require('googleapis');
 const { neon } = require('@neondatabase/serverless');
 const multer = require('multer');
 
-// Database connection with crash guard
+// Global error handlers – prevent Vercel crashes
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Database setup with fallback
 let sql;
 try {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL missing');
   sql = neon(process.env.DATABASE_URL);
 } catch (e) {
-  console.error('Neon connection error:', e.message);
+  console.error('Neon connection failed:', e.message);
   sql = null;
 }
 
 const app = express();
 
-// Multer memory storage for file uploads
+// Multer memory storage
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }
@@ -33,13 +41,13 @@ app.use(session({
   cookie: { secure: false }
 }));
 
-// Middleware to check database availability
+// Middleware – check database availability
 app.use((req, res, next) => {
-  if (!sql) return res.status(500).send('Database not connected. Set DATABASE_URL in Vercel environment variables.');
+  if (!sql) return res.status(500).send('Database not connected. Set DATABASE_URL environment variable.');
   next();
 });
 
-// Serve uploaded payment proof images from database
+// Serve uploaded payment proofs
 app.get('/proof-image/:id', async (req, res) => {
   try {
     const rows = await sql`SELECT file_data FROM payment_proofs WHERE id = ${req.params.id}`;
@@ -47,18 +55,14 @@ app.get('/proof-image/:id', async (req, res) => {
       const img = Buffer.from(rows[0].file_data, 'base64');
       res.writeHead(200, { 'Content-Type': 'image/png' });
       res.end(img);
-    } else {
-      res.status(404).send('Not found');
-    }
-  } catch (e) {
-    res.status(500).send('Error');
-  }
+    } else res.status(404).send('Not found');
+  } catch (e) { res.status(500).send('Error'); }
 });
 
-// ===================== DATABASE INITIALIZATION =====================
+// ===================== DATABASE INIT (Crash‑proof) =====================
 let dbReady = false;
 async function initDb() {
-  // Create tables (safe, each in try-catch)
+  // Each operation in its own try-catch to avoid fatal errors
   try { await sql`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password VARCHAR(50) NOT NULL, email VARCHAR(100) NOT NULL)`; } catch(e){}
   try { await sql`CREATE TABLE IF NOT EXISTS task_logs (id SERIAL PRIMARY KEY, username VARCHAR(50) NOT NULL, task_name VARCHAR(100) NOT NULL, proof_data TEXT, amount NUMERIC(10,2) DEFAULT 0.50, status VARCHAR(20) NOT NULL, timestamp VARCHAR(50) NOT NULL)`; } catch(e){}
   try { await sql`CREATE TABLE IF NOT EXISTS cpa_configs (id SERIAL PRIMARY KEY, network_name VARCHAR(100) NOT NULL, embed_code TEXT NOT NULL, instructions_en TEXT, instructions_si TEXT, instructions_ta TEXT, is_active INTEGER DEFAULT 1)`; } catch(e){}
@@ -67,7 +71,7 @@ async function initDb() {
   try { await sql`CREATE TABLE IF NOT EXISTS payment_proofs (id SERIAL PRIMARY KEY, buyer_username VARCHAR(50) NOT NULL, file_data TEXT, original_name VARCHAR(255), timestamp VARCHAR(50) NOT NULL, is_deleted INTEGER DEFAULT 0)`; } catch(e){}
   try { await sql`CREATE TABLE IF NOT EXISTS notifications (id SERIAL PRIMARY KEY, target_user VARCHAR(50) NOT NULL, message TEXT NOT NULL, timestamp VARCHAR(50) NOT NULL, is_read INTEGER DEFAULT 0)`; } catch(e){}
 
-  // Safe column additions
+  // Add missing columns
   try {
     await sql`
       DO $$ BEGIN
@@ -80,38 +84,29 @@ async function initDb() {
         ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by VARCHAR(50);
       END $$;
     `;
-  } catch(e) {}
+  } catch(e){}
   try { await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read INTEGER DEFAULT 0`; } catch(e){}
 
   // Default settings
   const settings = [
-    ['global_earnings_percentage', '100'],
-    ['google_sheet_config', ''],
-    ['gmail_task_price_lk', '0.25'],
-    ['gmail_task_price_intl', '0.25'],
-    ['gmail_task_instructions_en', 'Create a new Gmail account and submit credentials.'],
-    ['gmail_task_instructions_si', 'නව Gmail ගිණුමක් සාදා විස්තර ඇතුළත් කරන්න.'],
-    ['gmail_task_instructions_ta', 'புதிய Gmail கணக்கை உருவாக்கி விவரங்களைச் சமர்ப்பிக்கவும்.'],
-    ['referral_commission_tier1', '4'],
-    ['referral_commission_tier2', '5'],
-    ['referral_commission_tier3', '6'],
-    ['referral_commission_tier4', '7'],
-    ['referral_commission_tier5', '10'],
-    ['referral_commission_tier6', '15']
+    ['global_earnings_percentage','100'], ['google_sheet_config',''],
+    ['gmail_task_price_lk','0.25'], ['gmail_task_price_intl','0.25'],
+    ['gmail_task_instructions_en','Create a new Gmail account and submit credentials.'],
+    ['gmail_task_instructions_si','නව Gmail ගිණුමක් සාදා විස්තර ඇතුළත් කරන්න.'],
+    ['gmail_task_instructions_ta','புதிய Gmail கணக்கை உருவாக்கி விவரங்களைச் சமர்ப்பிக்கவும்.'],
+    ['referral_commission_tier1','4'], ['referral_commission_tier2','5'],
+    ['referral_commission_tier3','6'], ['referral_commission_tier4','7'],
+    ['referral_commission_tier5','10'], ['referral_commission_tier6','15']
   ];
-  for (const [k, v] of settings) {
+  for (const [k,v] of settings) {
     try { await sql`INSERT INTO system_settings (key, value) VALUES (${k}, ${v}) ON CONFLICT (key) DO NOTHING`; } catch(e){}
   }
 
-  // Default buyer account
+  // Default buyer
   try {
     const buyer = await sql`SELECT id FROM users WHERE username = 'buyer'`;
-    if (!buyer.length) {
-      await sql`INSERT INTO users (username, password, email, address, contact, balance_numeric) VALUES ('buyer', 'buyer123', 'buyer@galaxy.com', 'Buyer', '000', 0)`;
-    }
+    if (!buyer.length) await sql`INSERT INTO users (username, password, email, address, contact, balance_numeric) VALUES ('buyer', 'buyer123', 'buyer@galaxy.com', 'Buyer', '000', 0)`;
   } catch(e){}
-
-  console.log('Database initialized');
 }
 
 app.use(async (req, res, next) => {
@@ -121,7 +116,7 @@ app.use(async (req, res, next) => {
       dbReady = true;
     } catch (e) {
       console.error('DB init failed:', e);
-      return res.status(500).send('Database initialization error. Check DATABASE_URL.');
+      return res.status(500).send('Database initialization error. Please check DATABASE_URL.');
     }
   }
   next();
@@ -129,10 +124,8 @@ app.use(async (req, res, next) => {
 
 // ===================== HELPERS =====================
 async function getSetting(key) {
-  try {
-    const rows = await sql`SELECT value FROM system_settings WHERE key = ${key}`;
-    return rows.length ? rows[0].value : null;
-  } catch (e) { return null; }
+  try { const rows = await sql`SELECT value FROM system_settings WHERE key = ${key}`; return rows.length ? rows[0].value : null; }
+  catch(e) { return null; }
 }
 
 async function backupSheet(username, email, balance, taskCount) {
@@ -140,7 +133,7 @@ async function backupSheet(username, email, balance, taskCount) {
   if (!cfg) return;
   try {
     const config = JSON.parse(cfg);
-    if (!config.client_email || !config.private_key || !config.spreadsheet_id) return;
+    if(!config.client_email||!config.private_key||!config.spreadsheet_id) return;
     const auth = new google.auth.JWT(config.client_email, null, config.private_key.replace(/\\n/g, '\n'), ['https://www.googleapis.com/auth/spreadsheets']);
     const sheets = google.sheets({ version: 'v4', auth });
     await sheets.spreadsheets.values.append({
@@ -149,7 +142,7 @@ async function backupSheet(username, email, balance, taskCount) {
       valueInputOption: 'USER_ENTERED',
       resource: { values: [[new Date().toISOString(), username, email, balance, taskCount]] }
     });
-  } catch (e) { console.error("Sheet backup error:", e); }
+  } catch(e){}
 }
 
 function getInitials(username) {
@@ -191,53 +184,51 @@ async function generateUserCode(username, referredBy) {
   }
 }
 
-// ===================== TRANSLATIONS =====================
+// Translations
 const t = {
   en: {
-    title: "GALAXY WORKERS", login: "Login", reg: "Register",
-    user: "Username", pass: "Password", email: "Email", addr: "Address", phone: "Contact",
-    btnLog: "LOG IN", btnReg: "REGISTER", noAcc: "No account?", regHere: "Register here",
-    backLog: "Back", welcome: "Welcome", total: "Balance", tasks: "Available Tasks 👇",
-    subText: "Complete the tasks below.", logout: "Logout", forgot: "Forgot Password?",
-    notifTitle: "🔔 Notifications", gmailTask: "📧 Gmail Task",
-    gmailInstr: "Create a Gmail & submit.", emailCreated: "Email", emailPass: "Password",
-    submitGmail: "Submit", yourCode: "Your Code", getRefLink: "Referral Link",
-    refLink: "Your Referral Link", copyRef: "Copy", selectCountry: "Select Country",
-    countryLK: "Sri Lanka 🇱🇰", countryINTL: "International 🌍", gmailPrice: "Price/Gmail",
-    gmailHistory: "Gmail History", referralEarnings: "Referral Earnings",
-    buyerLogin: "Buyer Login", buyerDashboard: "Buyer Dashboard", buyerWelcome: "Welcome Buyer",
-    allPaymentsDone: "ALL PAID", paymentProof: "Payment Proof", uploadProof: "Upload",
-    done: "DONE", wrong: "WRONG", reason: "Reason", submitReason: "Send",
-    paymentReady: "Pay Ready", search: "Search", viewGmails: "📧 Gmails",
-    viewOtherTasks: "📋 Other Tasks", deleteTask: "Delete", hide: "Hide"
+    title:"GALAXY WORKERS",login:"Login",reg:"Register",
+    user:"Username",pass:"Password",email:"Email",addr:"Address",phone:"Contact",
+    btnLog:"LOG IN",btnReg:"REGISTER",noAcc:"No account?",regHere:"Register here",
+    backLog:"Back",welcome:"Welcome",total:"Balance",tasks:"Available Tasks",
+    subText:"Complete the tasks below.",logout:"Logout",forgot:"Forgot Password?",
+    notifTitle:"🔔 Notifications",gmailTask:"📧 Gmail Task",
+    gmailInstr:"Create a Gmail & submit.",emailCreated:"Email",emailPass:"Password",
+    submitGmail:"Submit",yourCode:"Your Code",getRefLink:"Referral Link",
+    refLink:"Your Referral Link",copyRef:"Copy",selectCountry:"Select Country",
+    countryLK:"Sri Lanka 🇱🇰",countryINTL:"International 🌍",gmailPrice:"Price/Gmail",
+    gmailHistory:"Gmail History",referralEarnings:"Referral Earnings",
+    buyerLogin:"Buyer Login",buyerDashboard:"Buyer Dashboard",buyerWelcome:"Welcome Buyer",
+    allPaymentsDone:"ALL PAID",paymentProof:"Payment Proof",uploadProof:"Upload",
+    done:"DONE",wrong:"WRONG",reason:"Reason",submitReason:"Send",
+    paymentReady:"Pay Ready",search:"Search",viewGmails:"📧 Gmails",
+    viewOtherTasks:"📋 Other Tasks",deleteTask:"Delete",hide:"Hide"
   },
   si: {
-    title: "GALAXY WORKERS", login: "ඇතුල්වීම", reg: "ලියාපදිංචිය",
-    user: "පරිශීලක", pass: "මුරපදය", email: "ඊමේල්", addr: "ලිපිනය", phone: "දුරකථන",
-    btnLog: "ඇතුල් වන්න", btnReg: "ලියාපදිංචි", noAcc: "ගිණුමක් නැද්ද?", regHere: "ලියාපදිංචි වන්න",
-    backLog: "ආපසු", welcome: "ආයුබෝවන්", total: "ශේෂය", tasks: "කාර්යයන් 👇",
-    subText: "පහත කාර්යයන් සම්පූර්ණ කරන්න.", logout: "ඉවත් වන්න", forgot: "මුරපදය අමතකද?",
-    notifTitle: "🔔 දැනුම්දීම්", gmailTask: "📧 Gmail",
-    gmailInstr: "Gmail ගිණුමක් සාදන්න.", emailCreated: "ඊමේල්", emailPass: "මුරපදය",
-    submitGmail: "යොමු කරන්න", yourCode: "ඔබේ කේතය", getRefLink: "Referral Link",
-    refLink: "ඔබේ Link", copyRef: "Copy", selectCountry: "රට තෝරන්න",
-    countryLK: "ශ්‍රී ලංකාව 🇱🇰", countryINTL: "විදෙස් 🌍", gmailPrice: "Gmail මිල",
-    gmailHistory: "Gmail ඉතිහාසය", referralEarnings: "Referral",
-    buyerLogin: "ගැනුම්කරු", buyerDashboard: "Buyer", buyerWelcome: "ආයුබෝවන්",
-    allPaymentsDone: "සියලු ගෙවීම්", paymentProof: "ගෙවීම් සාක්ෂි", uploadProof: "උඩුගත",
-    done: "හරි", wrong: "වැරදි", reason: "හේතුව", submitReason: "යවන්න",
-    paymentReady: "ගෙවීම් සූදානම්", search: "සොයන්න", viewGmails: "📧 Gmails",
-    viewOtherTasks: "📋 වෙනත්", deleteTask: "මකන්න", hide: "සඟවන්න"
+    title:"GALAXY WORKERS",login:"ඇතුල්වීම",reg:"ලියාපදිංචිය",
+    user:"පරිශීලක",pass:"මුරපදය",email:"ඊමේල්",addr:"ලිපිනය",phone:"දුරකථන",
+    btnLog:"ඇතුල් වන්න",btnReg:"ලියාපදිංචි",noAcc:"ගිණුමක් නැද්ද?",regHere:"ලියාපදිංචි වන්න",
+    backLog:"ආපසු",welcome:"ආයුබෝවන්",total:"ශේෂය",tasks:"කාර්යයන්",
+    subText:"පහත කාර්යයන් කරන්න.",logout:"ඉවත් වන්න",forgot:"මුරපදය අමතකද?",
+    notifTitle:"🔔 දැනුම්දීම්",gmailTask:"📧 Gmail",
+    gmailInstr:"Gmail ගිණුමක් සාදන්න.",emailCreated:"ඊමේල්",emailPass:"මුරපදය",
+    submitGmail:"යොමු කරන්න",yourCode:"ඔබේ කේතය",getRefLink:"Referral Link",
+    refLink:"ඔබේ Link",copyRef:"Copy",selectCountry:"රට තෝරන්න",
+    countryLK:"ශ්‍රී ලංකාව 🇱🇰",countryINTL:"විදෙස් 🌍",gmailPrice:"Gmail මිල",
+    gmailHistory:"Gmail ඉතිහාසය",referralEarnings:"Referral",
+    buyerLogin:"ගැනුම්කරු",buyerDashboard:"Buyer",buyerWelcome:"ආයුබෝවන්",
+    allPaymentsDone:"සියලු ගෙවීම්",paymentProof:"ගෙවීම් සාක්ෂි",uploadProof:"උඩුගත",
+    done:"හරි",wrong:"වැරදි",reason:"හේතුව",submitReason:"යවන්න",
+    paymentReady:"ගෙවීම් සූදානම්",search:"සොයන්න",viewGmails:"📧 Gmails",
+    viewOtherTasks:"📋 වෙනත්",deleteTask:"මකන්න",hide:"සඟවන්න"
   }
 };
 
-// HTML wrapper function
-const htmlWrapper = (req, title, content) => {
+// HTML builder (safe, no template literals)
+const htmlWrapper = (req, title, body) => {
   const lang = req.session.lang || 'en';
   const tr = t[lang];
-  const langSelect = '<select onchange="location.href=\'/change-lang?lang=\'+this.value" style="background:#0b0c10;color:#66fcf1;border:1px solid #45a29e;padding:6px;border-radius:5px">' +
-    '<option value="en" ' + (lang === 'en' ? 'selected' : '') + '>En</option>' +
-    '<option value="si" ' + (lang === 'si' ? 'selected' : '') + '>සිං</option></select>';
+  const langOptions = '<option value="en" ' + (lang === 'en' ? 'selected' : '') + '>En</option><option value="si" ' + (lang === 'si' ? 'selected' : '') + '>සිං</option>';
   return `<!DOCTYPE html><html lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${title}</title>
 <style>
   body{background:#0b0c10;color:#c5c6c7;font-family:sans-serif;padding:15px;margin:0}
@@ -269,8 +260,8 @@ const htmlWrapper = (req, title, content) => {
   .search-form input{flex:1}
   .search-form button{width:auto;margin:0}
   .toggle-btn{background:#45a29e;color:#000;padding:5px 10px;margin-right:5px;border:none;border-radius:4px;font-size:12px;cursor:pointer}
-  .iframe-container{position:relative; width:100%; height:400px; border:1px solid #45a29e; margin:10px 0; overflow:hidden}
-  .iframe-container iframe{position:absolute; top:0; left:0; width:100%; height:100%; border:none}
+  .iframe-container{position:relative;width:100%;height:400px;border:1px solid #45a29e;margin:10px 0;overflow:hidden}
+  .iframe-container iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:none}
 </style>
 <script>
   function switchSection(id){
@@ -291,25 +282,25 @@ const htmlWrapper = (req, title, content) => {
 </script>
 </head><body><div class="container">
 <div class="header"><h2>${tr.title}</h2>
-<div style="display:flex;gap:10px;align-items:center">${langSelect}
+<div style="display:flex;gap:10px;align-items:center">
+<select onchange="location.href='/change-lang?lang='+this.value" style="background:#0b0c10;color:#66fcf1;border:1px solid #45a29e;padding:6px;border-radius:5px">${langOptions}</select>
 <a href="/logout" class="logout-btn">${tr.logout}</a></div></div>
-${content}</div></body></html>`;
+${body}</div></body></html>`;
 };
 
-// ===================== ROUTES =====================
 app.get('/change-lang', (req, res) => {
   req.session.lang = req.query.lang === 'si' ? 'si' : 'en';
   res.redirect(req.get('referer') || '/');
 });
 
-// ---------- Auth ----------
+// Auth
 app.get('/', (req, res) => {
   if (req.session.user) return req.session.user === 'buyer' ? res.redirect('/buyer-dashboard') : res.redirect('/dashboard');
   const tr = t[req.session.lang || 'en'];
   res.send(htmlWrapper(req, 'Login', `<h3>${tr.login}</h3>
     <form action="/login" method="POST"><input name="username" placeholder="${tr.user}" required><input type="password" name="password" placeholder="${tr.pass}" required><button>${tr.btnLog}</button></form>
     <p style="text-align:center">${tr.noAcc} <a href="/register">${tr.regHere}</a></p>
-    <p style="text-align:center"><a href="/forgot-password" style="color:#ff4d4d">${tr.forgot}</a></p>`));
+    <p><a href="/forgot-password" style="color:#ff4d4d">${tr.forgot}</a></p>`));
 });
 
 app.get('/register', (req, res) => {
@@ -334,9 +325,9 @@ app.post('/register', async (req, res) => {
     const now = new Date().toLocaleString();
     await sql`INSERT INTO notifications (target_user, message, timestamp) VALUES (${username}, 'Welcome!', ${now})`;
     if (referredBy) await sql`INSERT INTO notifications (target_user, message, timestamp) VALUES (${referredBy}, ${'New referral: ' + username}, ${now})`;
-    backupSheet(username, email, 0, 0).catch(() => {});
+    backupSheet(username, email, 0, 0).catch(()=>{});
     res.send("<script>alert('Registered!'); location.href='/'</script>");
-  } catch (e) { console.error(e); res.send("<script>alert('Registration error'); location.href='/'</script>"); }
+  } catch(e) { console.error(e); res.send("<script>alert('Registration error'); location.href='/'</script>"); }
 });
 
 app.post('/login', async (req, res) => {
@@ -347,12 +338,12 @@ app.post('/login', async (req, res) => {
     const users = await sql`SELECT username FROM users WHERE username = ${username} AND password = ${password}`;
     if (users.length) { req.session.user = users[0].username; res.redirect('/dashboard'); }
     else res.send("<script>alert('Invalid credentials'); location.href='/'</script>");
-  } catch (e) { res.send("<script>alert('Login error'); location.href='/'</script>"); }
+  } catch(e) { res.send("<script>alert('Login error'); location.href='/'</script>"); }
 });
 
 app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/'); });
 
-// ---------- Buyer Dashboard (full functionality, search, DONE/WRONG, payment proofs) ----------
+// Buyer Dashboard
 app.get('/buyer-dashboard', async (req, res) => {
   if (req.session.user !== 'buyer') return res.redirect('/');
   const tr = t[req.session.lang || 'en'];
@@ -397,7 +388,7 @@ app.get('/buyer-dashboard', async (req, res) => {
     else proofHtml += '<p>No proofs.</p>';
 
     res.send(htmlWrapper(req, 'Buyer Dashboard', '<h3>' + tr.buyerWelcome + '</h3><form action="/buyer-all-payments-done" method="POST"><button class="payment-ready-btn">💰 ' + tr.allPaymentsDone + '</button></form>' + proofHtml + tasksHtml));
-  } catch (e) { console.error(e); res.status(500).send('Buyer dashboard error'); }
+  } catch(e) { console.error(e); res.status(500).send('Buyer dashboard error'); }
 });
 
 app.get('/buyer-mark-done', async (req, res) => {
@@ -408,7 +399,6 @@ app.get('/buyer-mark-done', async (req, res) => {
       const t = task[0];
       await sql`UPDATE gmail_tasks SET status='Success' WHERE id = ${req.query.id}`;
       await sql`UPDATE users SET balance_numeric = balance_numeric + ${t.amount} WHERE username = ${t.username}`;
-      // Referral commission logic
       if (t.referral_commission_paid === 0) {
         const user = await sql`SELECT referred_by FROM users WHERE username = ${t.username}`;
         if (user.length && user[0].referred_by) {
@@ -419,21 +409,18 @@ app.get('/buyer-mark-done', async (req, res) => {
           const usd = amt / 300;
           await sql`UPDATE users SET balance_numeric = balance_numeric + ${usd} WHERE username = ${user[0].referred_by}`;
           await sql`UPDATE gmail_tasks SET referral_commission_paid=1 WHERE id = ${req.query.id}`;
-          await sql`INSERT INTO notifications (target_user, message, timestamp) VALUES (${user[0].referred_by}, ${'💰 Ref. commission $' + usd.toFixed(2) + ' from ' + t.username}, ${new Date().toLocaleString()})`;
         }
       }
       await sql`INSERT INTO notifications (target_user, message, timestamp) VALUES (${t.username}, '🎉 Gmail approved!', ${new Date().toLocaleString()})`;
     }
     res.redirect('/buyer-dashboard');
-  } catch (e) { res.redirect('/buyer-dashboard'); }
+  } catch(e) { res.redirect('/buyer-dashboard'); }
 });
 
 app.post('/buyer-mark-wrong', async (req, res) => {
   if (req.session.user !== 'buyer') return res.redirect('/');
-  try {
-    await sql`UPDATE gmail_tasks SET status='Failed', buyer_reason=${req.body.reason} WHERE id = ${req.body.task_id} AND status='Pending'`;
-    res.redirect('/buyer-dashboard');
-  } catch (e) { res.redirect('/buyer-dashboard'); }
+  try { await sql`UPDATE gmail_tasks SET status='Failed', buyer_reason=${req.body.reason} WHERE id = ${req.body.task_id} AND status='Pending'`; } catch(e){}
+  res.redirect('/buyer-dashboard');
 });
 
 app.get('/buyer-mark-payment-ready', async (req, res) => {
@@ -454,7 +441,7 @@ app.post('/upload-payment-proof', upload.single('payment_proof'), async (req, re
     const b64 = req.file.buffer.toString('base64');
     await sql`INSERT INTO payment_proofs (buyer_username, file_data, original_name, timestamp) VALUES ('buyer', ${b64}, ${req.file.originalname}, ${new Date().toLocaleString()})`;
     res.redirect('/buyer-dashboard');
-  } catch(e){ res.redirect('/buyer-dashboard'); }
+  } catch(e) { res.redirect('/buyer-dashboard'); }
 });
 
 app.get('/delete-payment-proof', async (req, res) => {
@@ -463,7 +450,7 @@ app.get('/delete-payment-proof', async (req, res) => {
   res.redirect(req.session.user === 'admin' ? '/dashboard?tab=proofs' : '/buyer-dashboard');
 });
 
-// ---------- Main Dashboard (Admin & Worker) ----------
+// Main Dashboard (Admin & Worker)
 app.get('/dashboard', async (req, res) => {
   if (!req.session.user) return res.redirect('/');
   const username = req.session.user;
@@ -478,14 +465,14 @@ app.get('/dashboard', async (req, res) => {
       const allGmail = await sql`SELECT * FROM gmail_tasks ORDER BY id DESC`;
       const allProofs = await sql`SELECT * FROM payment_proofs WHERE is_deleted=0 ORDER BY id DESC`;
       const kw = req.query.search_keyword || '';
-      let filteredUsers = users;
+      let filtered = users;
       if (kw.trim()) {
         const k = kw.toLowerCase();
-        filteredUsers = users.filter(u => u.username.toLowerCase().includes(k) || u.email.toLowerCase().includes(k));
+        filtered = users.filter(u => u.username.toLowerCase().includes(k) || u.email.toLowerCase().includes(k));
       }
 
       let userHtml = '<h3>👥 Workers</h3><form class="search-form" method="GET"><input type="hidden" name="tab" value="users"><input name="search_keyword" value="' + kw + '" placeholder="' + tr.search + '..."><button>' + tr.search + '</button></form>';
-      filteredUsers.forEach(u => {
+      filtered.forEach(u => {
         const userLogs = allLogs.filter(l => l.username === u.username);
         const userGmails = allGmail.filter(g => g.username === u.username);
         const gDetail = userGmails.map(g => '<div>📧 ' + g.email_created + ' (' + g.task_code + ') - ' + g.status + '</div>').join('') || 'No Gmails';
@@ -497,9 +484,7 @@ app.get('/dashboard', async (req, res) => {
           '<div id="gmail-' + u.username + '" style="display:none">' + gDetail + '</div>' +
           '<div id="other-' + u.username + '" style="display:none">' + oDetail + '</div></div>';
       });
-
       const pend = allLogs.filter(l => l.status === 'Pending');
-      const adminTaskView = cpas.map(c => '<div class="user-row">' + c.network_name + ' - ' + c.embed_code + ' <a href="/remove-cpa?id=' + c.id + '">Delete</a></div>').join('');
 
       res.send(htmlWrapper(req, 'Admin Dashboard', '<h3>Welcome Admin</h3><div class="navbar">' +
         '<button class="nav-tab active" onclick="switchSection(\'panel\')">⚙️</button>' +
@@ -512,16 +497,15 @@ app.get('/dashboard', async (req, res) => {
         '<button class="nav-tab" onclick="switchSection(\'rsettings\')">💰</button>' +
         '</div><div id="panel" class="dashboard-section active">' +
         '<h3>Send Notification</h3><form action="/send-notification" method="POST"><select name="target_user"><option value="all">All</option>' + users.map(u => '<option>' + u.username + '</option>').join('') + '</select><input name="message" required><button>Send</button></form>' +
-        '<hr><h3>Add New Task</h3><form action="/add-cpa" method="POST"><input name="network_name" placeholder="Task Name" required><input name="embed_code" placeholder="Iframe code or URL" required><input name="instructions_en" placeholder="English Instructions"><input name="instructions_si" placeholder="Sinhala Instructions"><input name="instructions_ta" placeholder="Tamil Instructions"><button>Add Task</button></form>' +
-        '</div><div id="reviews" class="dashboard-section"><h3>Pending Submissions</h3>' + (pend.length ? pend.map(l => '<div class="user-row">' + l.username + ' - ' + l.task_name + ' <a href="/approve-task?id=' + l.id + '">Approve</a> <a href="/reject-task?id=' + l.id + '">Reject</a></div>').join('') : '<p>No pending</p>') + '</div>' +
+        '<hr><h3>Add New Task (iframe or URL)</h3><form action="/add-cpa" method="POST"><input name="network_name" placeholder="Task Name" required><input name="embed_code" placeholder="Iframe code or URL" required><input name="instructions_en" placeholder="EN Instructions"><input name="instructions_si" placeholder="SI Instructions"><input name="instructions_ta" placeholder="TA Instructions"><button>Add Task</button></form>' +
+        '</div><div id="reviews" class="dashboard-section"><h3>Pending Proofs</h3>' + (pend.length ? pend.map(l => '<div class="user-row">' + l.username + ' - ' + l.task_name + ' <a href="/approve-task?id=' + l.id + '">Approve</a> <a href="/reject-task?id=' + l.id + '">Reject</a></div>').join('') : '<p>No pending</p>') + '</div>' +
         '<div id="users" class="dashboard-section">' + userHtml + '</div>' +
-        '<div id="tasks" class="dashboard-section"><h3>Active Tasks</h3>' + adminTaskView + '</div>' +
-        '<div id="gmails" class="dashboard-section">' + allGmail.map(g => '<div>' + g.username + ': ' + g.email_created + ' (' + g.task_code + ') - ' + g.status + '</div>').join('') + '</div>' +
-        '<div id="proofs" class="dashboard-section">' + (allProofs.length ? allProofs.map(p => '<div><img src="/proof-image/' + p.id + '" style="max-width:300px"><p>' + p.timestamp + '</p><a href="/delete-payment-proof?id=' + p.id + '">Delete</a></div>').join('') : '<p>No proofs</p>') + '</div>' +
-        '<div id="gsettings" class="dashboard-section"><h3>Gmail Settings</h3><form action="/update-gmail-settings" method="POST"><label>Price LK:</label><input name="gmail_price_lk" value="' + (await getSetting('gmail_task_price_lk') || '0.25') + '"><label>Price INTL:</label><input name="gmail_price_intl" value="' + (await getSetting('gmail_task_price_intl') || '0.25') + '"><label>EN:</label><textarea name="instructions_en">' + (await getSetting('gmail_task_instructions_en') || '') + '</textarea><label>SI:</label><textarea name="instructions_si">' + (await getSetting('gmail_task_instructions_si') || '') + '</textarea><label>TA:</label><textarea name="instructions_ta">' + (await getSetting('gmail_task_instructions_ta') || '') + '</textarea><button>Update</button></form></div>' +
+        '<div id="tasks" class="dashboard-section"><h3>Active Tasks</h3>' + cpas.map(c => '<div class="user-row">' + c.network_name + ' <a href="/remove-cpa?id=' + c.id + '">Delete</a></div>').join('') + '</div>' +
+        '<div id="gmails" class="dashboard-section"><h3>All Gmail Submissions</h3>' + allGmail.map(g => '<div>' + g.username + ': ' + g.email_created + ' (' + g.task_code + ') - ' + g.status + '</div>').join('') + '</div>' +
+        '<div id="proofs" class="dashboard-section"><h3>Payment Proofs</h3>' + (allProofs.length ? allProofs.map(p => '<div><img src="/proof-image/' + p.id + '" style="max-width:300px"><p>' + p.timestamp + '</p><a href="/delete-payment-proof?id=' + p.id + '">Delete</a></div>').join('') : '<p>No proofs</p>') + '</div>' +
+        '<div id="gsettings" class="dashboard-section"><h3>Gmail Settings</h3><form action="/update-gmail-settings" method="POST"><label>Price LK:</label><input name="gmail_price_lk" value="' + (await getSetting('gmail_task_price_lk') || '0.25') + '"><label>Price INTL:</label><input name="gmail_price_intl" value="' + (await getSetting('gmail_task_price_intl') || '0.25') + '"><label>EN Instr:</label><textarea name="instructions_en">' + (await getSetting('gmail_task_instructions_en') || '') + '</textarea><label>SI Instr:</label><textarea name="instructions_si">' + (await getSetting('gmail_task_instructions_si') || '') + '</textarea><label>TA Instr:</label><textarea name="instructions_ta">' + (await getSetting('gmail_task_instructions_ta') || '') + '</textarea><button>Update</button></form></div>' +
         '<div id="rsettings" class="dashboard-section"><h3>Referral Commissions (LKR)</h3><form action="/update-referral-settings" method="POST">' + [1,2,3,4,5,6].map(i => '<label>Tier ' + i + ':</label><input name="tier' + i + '" value="' + (await getSetting('referral_commission_tier' + i) || [4,5,6,7,10,15][i-1]) + '">').join('') + '<button>Update</button></form></div>'));
     } else {
-      // Worker view
       const user = await sql`SELECT * FROM users WHERE username = ${username}`;
       if (!user.length) return res.redirect('/logout');
       const u = user[0];
@@ -540,38 +524,23 @@ app.get('/dashboard', async (req, res) => {
       const gPrice = parseFloat(await getSetting(country === 'LK' ? 'gmail_task_price_lk' : 'gmail_task_price_intl') || '0.25');
       const instr = country === 'LK' ? (await getSetting('gmail_task_instructions_si') || '') : (await getSetting('gmail_task_instructions_en') || '');
 
-      // Build task cards (iframe support)
-      let cpaTasksHtml = '<h3>' + tr.tasks + '</h3><p>' + tr.subText + '</p>';
-      if (!cpas.length) cpaTasksHtml += '<p style="text-align:center;color:#ff4d4d">No tasks available.</p>';
+      let cpaHtml = '<h3>' + tr.tasks + '</h3><p>' + tr.subText + '</p>';
+      if (!cpas.length) cpaHtml += '<p style="text-align:center;color:#ff4d4d">No tasks available.</p>';
       else {
         cpas.forEach(c => {
           const instructions = (lang === 'si' ? c.instructions_si : (lang === 'ta' ? c.instructions_ta : c.instructions_en));
           const isIframe = c.embed_code.trim().toLowerCase().startsWith('<iframe');
-          cpaTasksHtml += `<div class="user-row">
-            <h4 style="color:#66fcf1;margin:0 0 5px 0;">🌐 ${c.network_name}</h4>
-            <p style="font-size:14px;color:#45a29e;">📋 <strong>Instructions:</strong> ${instructions}</p>`;
+          cpaHtml += '<div class="user-row"><h4 style="color:#66fcf1;margin:0 0 5px 0;">🌐 ' + c.network_name + '</h4><p style="font-size:14px;color:#45a29e;">📋 <strong>Instructions:</strong> ' + instructions + '</p>';
           if (isIframe) {
-            // Embed iframe directly
-            cpaTasksHtml += `<div class="iframe-container">${c.embed_code}</div>`;
+            cpaHtml += '<div class="iframe-container">' + c.embed_code + '</div>';
           } else {
-            cpaTasksHtml += `<div class="galaxy-task-card-white" style="background:#fff;color:#333;padding:25px;border-radius:8px;text-align:center;margin:10px 0;">
-              <h4>Galaxy Verification Protocol</h4>
-              <p>Complete the task via the link below and submit proof.</p>
-              <a href="${c.embed_code}" target="_blank" class="galaxy-start-btn" style="display:inline-block;width:85%;padding:12px;background:#2ecc71;color:#fff;font-weight:bold;text-decoration:none;border-radius:5px;">⚡ START VERIFICATION TASK</a>
-            </div>`;
+            cpaHtml += '<div style="background:#fff;color:#333;padding:25px;border-radius:8px;text-align:center;margin:10px 0;"><h4>Galaxy Verification Protocol</h4><p>Complete the task via the link below and submit proof.</p><a href="' + c.embed_code + '" target="_blank" style="display:inline-block;width:85%;padding:12px;background:#2ecc71;color:#fff;font-weight:bold;text-decoration:none;border-radius:5px;">⚡ START VERIFICATION TASK</a></div>';
           }
-          cpaTasksHtml += `<div class="proof-form" style="background:#0b0c10;padding:12px;border-radius:5px;margin-top:10px;border:1px dashed #45a29e;">
-            <form action="/submit-task-proof" method="POST">
-              <input type="hidden" name="task_name" value="${c.network_name}">
-              <label style="font-size:12px;color:#45a29e;"><strong>Submit Proof Code/Data:</strong></label>
-              <input type="text" name="proof_data" placeholder="Paste your confirmation code..." required>
-              <button type="submit" style="padding:10px;font-size:14px;background:#66fcf1;color:#000;">Submit Proof</button>
-            </form>
-          </div></div>`;
+          cpaHtml += '<div class="proof-form" style="background:#0b0c10;padding:12px;border-radius:5px;margin-top:10px;border:1px dashed #45a29e;"><form action="/submit-task-proof" method="POST"><input type="hidden" name="task_name" value="' + c.network_name + '"><label style="font-size:12px;color:#45a29e;"><strong>Submit Proof Code/Data:</strong></label><input type="text" name="proof_data" placeholder="Paste your confirmation code..." required><button type="submit" style="padding:10px;font-size:14px;background:#66fcf1;color:#000;">Submit Proof</button></form></div></div>';
         });
       }
 
-      const gmailHistoryHtml = gmailLogs.length ? gmailLogs.map(g => {
+      const ghist = gmailLogs.length ? gmailLogs.map(g => {
         const delBtn = g.status === 'Pending' ? '<a href="/delete-gmail-task?id=' + g.id + '" style="color:#ff4d4d;font-size:12px">' + tr.deleteTask + '</a>' : '';
         return '<div class="user-row" style="border-left-color:' + (g.status === 'Success' || g.status === 'PaymentReady' ? '#45a29e' : g.status === 'Pending' ? '#f0ad4e' : '#ff4d4d') + '">📧 ' + g.email_created + ' | 🔑 ' + g.password_created + ' | Code: ' + g.task_code + '<br>Status: ' + g.status + ' | $' + g.amount + ' | ' + g.timestamp + (g.buyer_reason ? '<br>Reason: ' + g.buyer_reason : '') + ' ' + delBtn + '</div>';
       }).join('') : '<p>No Gmail tasks.</p>';
@@ -586,17 +555,17 @@ app.get('/dashboard', async (req, res) => {
         '<button class="nav-tab" onclick="switchSection(\'worker-notifs\')">🔔 Alerts' + (unread[0].c > 0 ? ' <span style="background:red;color:#fff;border-radius:50%;padding:2px 5px">' + unread[0].c + '</span>' : '') + '</button>' +
         '<button class="nav-tab" onclick="switchSection(\'worker-logs\')">📊 Logs</button>' +
         '</div>' +
-        '<div id="worker-tasks" class="dashboard-section active">' + cpaTasksHtml + '</div>' +
+        '<div id="worker-tasks" class="dashboard-section active">' + cpaHtml + '</div>' +
         '<div id="worker-gmail" class="dashboard-section"><h3>' + tr.gmailTask + '</h3><p>' + instr + '</p><p><strong>Price:</strong> $' + gPrice.toFixed(2) + '</p><p><strong>' + tr.yourCode + ':</strong> ' + u.referral_code + '</p><form action="/submit-gmail-task" method="POST"><input type="email" name="email_created" placeholder="' + tr.emailCreated + '" required><input name="password_created" placeholder="' + tr.emailPass + '" required><button>' + tr.submitGmail + '</button></form><button onclick="document.getElementById(\'refSec\').style.display=\'block\';this.style.display=\'none\'" style="background:#f39c12;color:#fff;margin-top:10px">' + tr.getRefLink + '</button><div id="refSec" style="display:none"><input id="refLinkInput" value="https://' + req.get('host') + '/register?ref=' + u.referral_code + '" readonly><button onclick="copyRef()">' + tr.copyRef + '</button></div></div>' +
-        '<div id="worker-gmail-history" class="dashboard-section">' + gmailHistoryHtml + '</div>' +
+        '<div id="worker-gmail-history" class="dashboard-section">' + ghist + '</div>' +
         '<div id="worker-referrals" class="dashboard-section">' + ((await sql`SELECT * FROM users WHERE referred_by = ${username}`).map(r => '<div class="user-row">👤 ' + r.username + ' (' + (r.referral_code || 'N/A') + ')</div>').join('') || '<p>No referrals</p>') + '</div>' +
         '<div id="worker-notifs" class="dashboard-section">' + notifs.map(n => '<div class="user-row">' + n.message + ' <small>' + n.timestamp + '</small> ' + (n.is_read ? '' : '<a href="/mark-notif-read?id=' + n.id + '">Read</a>') + '</div>').join('') + '</div>' +
         '<div id="worker-logs" class="dashboard-section">' + (logs.length ? logs.map(l => '<div class="user-row">' + l.task_name + ' - ' + l.status + ' $' + l.amount + '</div>').join('') : '<p>No logs</p>') + '</div>'));
     }
-  } catch (e) { console.error(e); res.status(500).send('Dashboard error'); }
+  } catch(e) { console.error(e); res.status(500).send('Dashboard error'); }
 });
 
-// ---------- Task submission routes ----------
+// Task actions
 app.post('/submit-gmail-task', async (req, res) => {
   if (!req.session.user || ['admin','buyer'].includes(req.session.user)) return res.redirect('/');
   const { email_created, password_created } = req.body;
@@ -610,7 +579,7 @@ app.post('/submit-gmail-task', async (req, res) => {
     await sql`INSERT INTO notifications (target_user, message, timestamp) VALUES (${req.session.user}, '📧 Gmail submitted!', ${new Date().toLocaleString()})`;
     await sql`INSERT INTO notifications (target_user, message, timestamp) VALUES ('buyer', ${'📧 New Gmail from ' + req.session.user}, ${new Date().toLocaleString()})`;
     res.send("<script>alert('Gmail submitted!'); location.href='/dashboard?tab=worker-gmail-history'</script>");
-  } catch (e) { console.error(e); res.redirect('/dashboard'); }
+  } catch(e) { console.error(e); res.redirect('/dashboard'); }
 });
 
 app.get('/delete-gmail-task', async (req, res) => {
@@ -621,10 +590,8 @@ app.get('/delete-gmail-task', async (req, res) => {
 
 app.post('/submit-task-proof', async (req, res) => {
   if (!req.session.user || ['admin','buyer'].includes(req.session.user)) return res.redirect('/');
-  try {
-    await sql`INSERT INTO task_logs (username, task_name, proof_data, amount, status, timestamp) VALUES (${req.session.user}, ${req.body.task_name}, ${req.body.proof_data}, 0.50, 'Pending', ${new Date().toLocaleString()})`;
-    res.send("<script>alert('Proof submitted!'); location.href='/dashboard'</script>");
-  } catch (e) { res.redirect('/dashboard'); }
+  await sql`INSERT INTO task_logs (username, task_name, proof_data, amount, status, timestamp) VALUES (${req.session.user}, ${req.body.task_name}, ${req.body.proof_data}, 0.50, 'Pending', ${new Date().toLocaleString()})`;
+  res.send("<script>alert('Proof submitted!'); location.href='/dashboard'</script>");
 });
 
 app.get('/mark-notif-read', async (req, res) => {
@@ -635,14 +602,12 @@ app.get('/mark-notif-read', async (req, res) => {
 
 app.get('/approve-task', async (req, res) => {
   if (req.session.user !== 'admin') return res.redirect('/');
-  try {
-    const log = await sql`SELECT * FROM task_logs WHERE id = ${req.query.id} AND status='Pending'`;
-    if (log.length) {
-      await sql`UPDATE task_logs SET status='Success' WHERE id = ${req.query.id}`;
-      await sql`UPDATE users SET balance_numeric = balance_numeric + ${log[0].amount} WHERE username = ${log[0].username}`;
-    }
-    res.redirect('/dashboard?tab=reviews');
-  } catch (e) { res.redirect('/dashboard'); }
+  const log = await sql`SELECT * FROM task_logs WHERE id = ${req.query.id} AND status='Pending'`;
+  if (log.length) {
+    await sql`UPDATE task_logs SET status='Success' WHERE id = ${req.query.id}`;
+    await sql`UPDATE users SET balance_numeric = balance_numeric + ${log[0].amount} WHERE username = ${log[0].username}`;
+  }
+  res.redirect('/dashboard?tab=reviews');
 });
 
 app.get('/reject-task', async (req, res) => {
@@ -672,10 +637,8 @@ app.get('/remove-user', async (req, res) => {
 app.post('/add-cpa', async (req, res) => {
   if (req.session.user !== 'admin') return res.redirect('/');
   const { network_name, embed_code, instructions_en, instructions_si, instructions_ta } = req.body;
-  try {
-    await sql`INSERT INTO cpa_configs (network_name, embed_code, instructions_en, instructions_si, instructions_ta, is_active) VALUES (${network_name}, ${embed_code}, ${instructions_en}, ${instructions_si}, ${instructions_ta}, 1)`;
-    res.redirect('/dashboard');
-  } catch (e) { res.redirect('/dashboard'); }
+  try { await sql`INSERT INTO cpa_configs (network_name, embed_code, instructions_en, instructions_si, instructions_ta, is_active) VALUES (${network_name}, ${embed_code}, ${instructions_en}, ${instructions_si}, ${instructions_ta}, 1)`; } catch(e){}
+  res.redirect('/dashboard');
 });
 
 app.get('/remove-cpa', async (req, res) => {
@@ -703,7 +666,7 @@ app.post('/update-gmail-settings', async (req, res) => {
 
 app.post('/update-referral-settings', async (req, res) => {
   if (req.session.user !== 'admin') return res.redirect('/');
-  for (let i = 1; i <= 6; i++) await sql`UPDATE system_settings SET value = ${req.body['tier' + i]} WHERE key = ${'referral_commission_tier' + i}`;
+  for (let i=1;i<=6;i++) await sql`UPDATE system_settings SET value = ${req.body['tier'+i]} WHERE key = ${'referral_commission_tier'+i}`;
   res.send("<script>alert('Updated!'); location.href='/dashboard?tab=rsettings'</script>");
 });
 
