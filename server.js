@@ -293,7 +293,7 @@ const translations = {
     }
 };
 
-// HTML Wrapper (unchanged except small tweaks for new UI elements)
+// HTML Wrapper
 const htmlWrapper = (req, title, content) => {
     const lang = req.session.lang || 'en';
     const t = translations[lang];
@@ -329,7 +329,6 @@ const htmlWrapper = (req, title, content) => {
         .search-form input{flex:1}
         .search-form button{width:auto;margin:0}
         .gmail-detail{font-size:12px;color:#aaa; margin-left:20px}
-        .offerwall-iframe{width:100%;height:600px;border:1px solid #45a29e;margin-top:10px}
     </style>
     <script>
         function switchSection(id){
@@ -348,12 +347,6 @@ const htmlWrapper = (req, title, content) => {
             inp.select();
             document.execCommand('copy');
             alert('Copied!');
-        }
-        // NEW: Toggle offerwall iframe visibility
-        function toggleOfferwall(id){
-            var div = document.getElementById('offerwall-'+id);
-            if(div.style.display==='none') div.style.display='block';
-            else div.style.display='none';
         }
     </script></head><body><div class="container">
     <div class="header-block"><h2 class="header-title">${t.title}</h2>
@@ -745,10 +738,7 @@ app.get('/dashboard', async (req, res) => {
                     ${cpas.map(c => {
                         const embed = c.embed_code.trim();
                         return `<div class="user-row"><strong>${c.network_name}</strong><br>${(lang==='si'?c.instructions_si:lang==='ta'?c.instructions_ta:c.instructions_en)}<br>
-                        <button onclick="toggleOfferwall('${c.id}')" style="width:auto;background:#f39c12;color:#000;padding:5px 15px;">Show Offerwall</button>
-                        <div id="offerwall-${c.id}" style="display:none; margin-top:10px; border:1px solid #45a29e; padding:5px;">
-                            <iframe src="${embed}" class="offerwall-iframe" allowfullscreen></iframe>
-                        </div>
+                        <a href="${embed}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#45a29e;color:#0b0c10;padding:10px 20px;border-radius:5px;text-decoration:none;font-weight:bold;">🚀 Start Task</a>
                         </div>`;
                     }).join('')}
                     <h4>Submit Proof</h4>
