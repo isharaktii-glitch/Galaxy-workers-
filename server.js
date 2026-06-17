@@ -1,16 +1,14 @@
 require('dotenv').config();
 const express = require('express');
-const cookieSession = require('cookie-session'); // Changed from express-session
+const cookieSession = require('cookie-session');
 const bodyParser = require('body-parser');
 const { google } = require('googleapis');
 const { neon } = require('@neondatabase/serverless');
 const multer = require('multer');
 
-// Neon Database Connection
 const sql = neon(process.env.DATABASE_URL);
 const app = express();
 
-// Multer memory storage (no disk write)
 const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 }
@@ -19,16 +17,14 @@ const upload = multer({
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
-// Session via cookie (serverless-safe)
 app.use(cookieSession({
     name: 'session',
     keys: ['galaxy-2026-super-secret'],
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    maxAge: 24 * 60 * 60 * 1000,
     httpOnly: true,
-    secure: false // set to true if using HTTPS (Vercel auto-HTTPS ok)
+    secure: false
 }));
 
-// Serve payment proof images from database
 app.get('/proof-image/:id', async (req, res) => {
     try {
         const rows = await sql`SELECT file_data FROM payment_proofs WHERE id = ${req.params.id}`;
@@ -46,7 +42,6 @@ app.get('/proof-image/:id', async (req, res) => {
 
 // ===================== DATABASE INITIALIZATION =====================
 async function initDb() {
-    // Create tables if not exist
     await sql`CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username VARCHAR(50) UNIQUE NOT NULL,
@@ -103,7 +98,6 @@ async function initDb() {
         is_read INTEGER DEFAULT 0
     )`;
 
-    // Safe column additions
     await sql`
         DO $$ BEGIN
             ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;
@@ -117,7 +111,6 @@ async function initDb() {
     `;
     await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read INTEGER DEFAULT 0`;
 
-    // Default settings
     const settings = [
         ['global_earnings_percentage', '100'],
         ['google_sheet_config', ''],
@@ -137,7 +130,6 @@ async function initDb() {
         await sql`INSERT INTO system_settings (key, value) VALUES (${key}, ${value}) ON CONFLICT (key) DO NOTHING`;
     }
 
-    // Default buyer account
     const buyer = await sql`SELECT id FROM users WHERE username = 'buyer'`;
     if (!buyer.length) {
         await sql`INSERT INTO users (username, password, email, address, contact, balance_numeric) VALUES ('buyer', 'buyer123', 'buyer@galaxy.com', 'Buyer Address', '000000', 0)`;
@@ -185,7 +177,6 @@ async function backupSheet(username, email, balance, taskCount) {
     } catch (e) { console.error("Sheet backup error:", e); }
 }
 
-// Generate Gmail Task Code (user permanent code)
 function getUserInitials(username) {
     const parts = username.trim().split(' ');
     if (parts.length >= 2) {
@@ -289,7 +280,7 @@ const translations = {
     }
 };
 
-// ===================== HTML WRAPPER (Adsterra Script Added Here) =====================
+// ===================== HTML WRAPPER (Updated for Script Execution) =====================
 const htmlWrapper = (req, title, content) => {
     const lang = req.session.lang || 'en';
     const t = translations[lang];
@@ -325,6 +316,7 @@ const htmlWrapper = (req, title, content) => {
         .search-form input{flex:1}
         .search-form button{width:auto;margin:0}
         .gmail-detail{font-size:12px;color:#aaa; margin-left:20px}
+        .ad-container{display:none}
     </style>
     <script>
         function switchSection(id){
@@ -344,8 +336,33 @@ const htmlWrapper = (req, title, content) => {
             document.execCommand('copy');
             alert('Copied!');
         }
+        // ========== NEW: Execute Script Code from Add Task ==========
+        function executeScriptCode(code) {
+            if (!code) return;
+            // Remove any existing dynamic script
+            const old = document.getElementById('dynamic-ad-script');
+            if (old) old.remove();
+            // Create a new script element
+            const script = document.createElement('script');
+            script.id = 'dynamic-ad-script';
+            // Check if it's a src-based script
+            const srcMatch = code.match(/src=["']([^"']+)["']/);
+            if (srcMatch) {
+                script.src = srcMatch[1];
+                script.async = true;
+                // Also, if there's extra code (like inline), we add it too
+                const inlineMatch = code.match(/>([\s\S]*?)<\/script>/);
+                if (inlineMatch && inlineMatch[1].trim()) {
+                    script.textContent = inlineMatch[1];
+                }
+            } else {
+                // Pure inline script
+                script.textContent = code.replace(/<script>/g, '').replace(/<\/script>/g, '');
+            }
+            document.body.appendChild(script);
+        }
     </script>
-    <!-- Adsterra Popunder Script -->
+    <!-- Global Adsterra Popunder (for background) -->
     <script src="https://pl29778793.effectivecpmnetwork.com/e8/4a/4b/e84a4b1b96562abbbaec72765c7ae7ee.js"></script>
 </head><body><div class="container">
     <div class="header-block"><h2 class="header-title">${t.title}</h2>
@@ -428,7 +445,6 @@ app.post('/login', async (req, res) => {
     } catch (e) { console.error(e); res.send("<script>alert('Error'); location.href='/'</script>"); }
 });
 
-// Logout – clear cookie session
 app.get('/logout', (req, res) => { req.session = null; res.redirect('/'); });
 
 // ===================== BUYER DASHBOARD =====================
@@ -620,7 +636,7 @@ app.get('/dashboard', async (req, res) => {
                     <hr><h3>➕ Add Task</h3>
                     <form action="/add-cpa" method="POST">
                         <input name="network_name" placeholder="Task Name" required>
-                        <input name="embed_code" placeholder="URL" required>
+                        <input name="embed_code" placeholder="URL or Script Code" required>
                         <input name="instructions_en" placeholder="EN Instructions" required>
                         <input name="instructions_si" placeholder="SI Instructions" required>
                         <input name="instructions_ta" placeholder="TA Instructions" required>
@@ -720,6 +736,24 @@ app.get('/dashboard', async (req, res) => {
                 </div>`;
             }).join('');
 
+            // ========== MODIFIED: Render Tasks with Script Execution Support ==========
+            const tasksHtml = cpas.map(c => {
+                const embed = c.embed_code.trim();
+                // Check if it's a script tag (starts with <script and ends with </script>)
+                const isScript = embed.startsWith('<script') && embed.endsWith('</script>');
+                if (isScript) {
+                    // Escape for safe embedding in onclick (single quotes)
+                    const escapedCode = embed.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    return `<div class="user-row"><strong>${c.network_name}</strong><br>${(lang==='si'?c.instructions_si:lang==='ta'?c.instructions_ta:c.instructions_en)}<br>
+                    <button onclick="executeScriptCode('${escapedCode}')" style="display:inline-block;background:#45a29e;color:#0b0c10;padding:10px 20px;border-radius:5px;border:none;font-weight:bold;cursor:pointer;">🚀 Start Task</button>
+                    </div>`;
+                } else {
+                    return `<div class="user-row"><strong>${c.network_name}</strong><br>${(lang==='si'?c.instructions_si:lang==='ta'?c.instructions_ta:c.instructions_en)}<br>
+                    <a href="${embed}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#45a29e;color:#0b0c10;padding:10px 20px;border-radius:5px;text-decoration:none;font-weight:bold;">🚀 Start Task</a>
+                    </div>`;
+                }
+            }).join('');
+
             res.send(htmlWrapper(req, 'Worker Dashboard', `
                 <h3>${t.welcome}, ${username}</h3>
                 <div class="stats-grid"><div class="stat-card"><h3>$${bal.toFixed(2)}</h3><p>${t.total}</p></div></div>
@@ -732,12 +766,7 @@ app.get('/dashboard', async (req, res) => {
                     <button class="nav-tab" onclick="switchSection('worker-logs')">📊 Logs</button>
                 </div>
                 <div id="worker-tasks" class="dashboard-section active">
-                    ${cpas.map(c => {
-                        const embed = c.embed_code.trim();
-                        return `<div class="user-row"><strong>${c.network_name}</strong><br>${(lang==='si'?c.instructions_si:lang==='ta'?c.instructions_ta:c.instructions_en)}<br>
-                        <a href="${embed}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#45a29e;color:#0b0c10;padding:10px 20px;border-radius:5px;text-decoration:none;font-weight:bold;">🚀 Start Task</a>
-                        </div>`;
-                    }).join('')}
+                    ${tasksHtml}
                     <h4>Submit Proof</h4>
                     <form action="/submit-task-proof" method="POST">
                         <input name="task_name" placeholder="Task name"><input name="proof_data" placeholder="Proof"><button>Submit</button>
@@ -796,7 +825,6 @@ app.post('/submit-gmail-task', async (req, res) => {
     } catch (e) { console.error(e); res.redirect('/dashboard'); }
 });
 
-// Delete Gmail task (by worker, only if pending)
 app.get('/delete-gmail-task', async (req, res) => {
     if (!req.session.user || ['admin','buyer'].includes(req.session.user)) return res.redirect('/');
     const id = parseInt(req.query.id);
@@ -809,14 +837,12 @@ app.get('/delete-gmail-task', async (req, res) => {
     } catch (e) { res.redirect('/dashboard'); }
 });
 
-// Country update
 app.post('/update-country', async (req, res) => {
     if (!req.session.user || ['admin','buyer'].includes(req.session.user)) return res.redirect('/');
     await sql`UPDATE users SET country = ${req.body.country} WHERE username = ${req.session.user}`;
     res.redirect('/dashboard');
 });
 
-// Admin: Update Gmail settings
 app.post('/update-gmail-settings', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     const { gmail_price_lk, gmail_price_intl, instructions_en, instructions_si, instructions_ta } = req.body;
@@ -828,14 +854,12 @@ app.post('/update-gmail-settings', async (req, res) => {
     res.send("<script>alert('Updated!'); location.href='/dashboard?tab=gmail-settings'</script>");
 });
 
-// Admin: Update Referral settings
 app.post('/update-referral-settings', async (req, res) => {
     if (req.session.user !== 'admin') return res.redirect('/');
     for (let i=1; i<=6; i++) await sql`UPDATE system_settings SET value = ${req.body['tier'+i]} WHERE key = ${'referral_commission_tier'+i}`;
     res.send("<script>alert('Updated!'); location.href='/dashboard?tab=referral-settings'</script>");
 });
 
-// Submit proof for other tasks
 app.post('/submit-task-proof', async (req, res) => {
     if (!req.session.user || ['admin','buyer'].includes(req.session.user)) return res.redirect('/');
     try {
