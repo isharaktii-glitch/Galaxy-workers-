@@ -289,7 +289,7 @@ const translations = {
     }
 };
 
-// ===================== HTML WRAPPER (Adsterra Script Added Here) =====================
+// HTML Wrapper (unchanged from original)
 const htmlWrapper = (req, title, content) => {
     const lang = req.session.lang || 'en';
     const t = translations[lang];
@@ -344,10 +344,7 @@ const htmlWrapper = (req, title, content) => {
             document.execCommand('copy');
             alert('Copied!');
         }
-    </script>
-    <!-- Adsterra Popunder Script -->
-    <script src="https://pl29778793.effectivecpmnetwork.com/e8/4a/4b/e84a4b1b96562abbbaec72765c7ae7ee.js"></script>
-</head><body><div class="container">
+    </script></head><body><div class="container">
     <div class="header-block"><h2 class="header-title">${t.title}</h2>
     <div style="display:flex;gap:10px;align-items:center">
         <div class="lang-selector"><select onchange="location.href='/change-lang?lang='+this.value">
